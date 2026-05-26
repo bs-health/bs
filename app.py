@@ -39,7 +39,7 @@ def standardize_site_name(name):
     # 1. 공백 완벽 제거
     name = str(name).replace(' ', '')
     
-    # 2. 💡 [신규] 특정 사업장명 최우선 강제 통일 (오타 및 변형 방지)
+    # 2. 특정 사업장명 최우선 강제 통일 (오타 및 변형 방지)
     early_mapping = {
         '서울보증': '서울보증보험',
         '경주교원드림센터': '교원경주드림센터',
@@ -48,7 +48,6 @@ def standardize_site_name(name):
     }
     name = early_mapping.get(name, name)
     
-    # 이미 목표한 이름으로 완벽하게 변환되었다면, 아래의 센터->FC 변환이나 꼬리표 제거 로직을 타지 않고 즉시 반환 (안전장치)
     if name in ['교원경주드림센터', '서울보증보험']:
         return name
 
@@ -344,26 +343,63 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             
             with st.expander(header_title, expanded=is_auto_expand):
                 col_left, col_right = st.columns(2)
+                
                 with col_left:
+                    # 💡 복구됨: 기본 정보 테이블
                     date_str = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) else str(row['날짜'])
                     st.markdown(f"""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
                             <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📋 현장 기본 정보</h4>
                             <table style="width: 100%; font-size: 13px;">
                                 <tr><td style="font-weight: bold; width: 40%; color: #475569;">보고자</td><td>{row['참여자']}</td></tr>
+                                <tr><td style="font-weight: bold; color: #475569;">점검시간</td><td>{date_str}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{row['체감온도_수치']:.1f} ℃</span></td></tr>
+                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보발효</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여부']}</td></tr>
                             </table>
                         </div>
                     """, unsafe_allow_html=True)
+                    
+                    # 💡 복구됨: 핵심 보건 관리 항목(H~M열)
+                    st.markdown(f"""
+                        <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
+                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">✔️ 핵심 보건 관리 항목</h4>
+                            <table style="width: 100%; font-size: 13px;">
+                                <tr><td style="font-weight: bold; width: 40%; color: #475569; padding-bottom:4px;">식수 및 음료지급</td><td>{row['음료제공방식']}</td></tr>
+                                <tr><td style="font-weight: bold; color: #475569; padding-bottom:4px;">민감근로자 관리</td><td>{row['민감군관리']}</td></tr>
+                                <tr><td style="font-weight: bold; color: #475569; padding-bottom:4px;">비상 응급조치</td><td>{row['응급조치숙지']}</td></tr>
+                            </table>
+                        </div>
+                    """, unsafe_allow_html=True)
+
                 with col_right:
-                    notes_text = row['특이사항'] if pd.notna(row['특이사항']) else "특이사항 없음"
+                    # 💡 복구됨: 단계별 조치 실태 (1,2,3단계)
+                    p1_formatted = "".join([f"<li style='margin-bottom: 4px;'>{act.strip()}</li>" for act in str(row['평상시조치']).split('|') if act.strip()])
+                    p2_actions = str(row['35도이상조치']).split('|') if pd.notna(row['35도이상조치']) else []
+                    p2_formatted = "".join([f"<li style='margin-bottom: 4px;'>{act.strip()}</li>" for act in p2_actions if act.strip()]) if p2_actions and p2_actions[0] != 'nan' else "<li>해당 없음</li>"
+                    p3_actions = str(row['38도이상조치']).split('|') if pd.notna(row['38도이상조치']) else []
+                    p3_formatted = "".join([f"<li style='margin-bottom: 4px;'>{act.strip()}</li>" for act in p3_actions if act.strip()]) if p3_actions and p3_actions[0] != 'nan' else "<li>해당 없음</li>"
+
+                    st.markdown(f"""
+                        <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
+                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">🌡️ 단계별 조치 이행 실태</h4>
+                            <div style="font-size: 13px;">
+                                <strong style="color: #0d9488;">[1단계] 평상시 예방 조치:</strong><ul style="padding-left: 15px; color: #334155; margin-bottom: 8px;">{p1_formatted}</ul>
+                                <strong style="color: #ea580c;">[2단계] 35도 돌파 시 조치:</strong><ul style="padding-left: 15px; color: #334155; margin-bottom: 8px;">{p2_formatted}</ul>
+                                <strong style="color: #dc2626;">[3단계] 38도 돌파 시 조치:</strong><ul style="padding-left: 15px; color: #334155; margin-bottom: 0px;">{p3_formatted}</ul>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # 💡 복구됨: 특이사항 코멘트
+                    notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
                     st.markdown(f"""
                         <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #0f172a; font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">✍️ 종합 코멘트</h4>
+                            <h4 style="margin-top:0; color: #0f172a; font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">✍️ 현장 소장 종합 코멘트</h4>
                             <div style="font-size: 13px; color: #475569; font-style: italic;">"{notes_text}"</div>
                         </div>
                     """, unsafe_allow_html=True)
                 
+                # 누적 변화 추이
                 st.markdown("#### 📈 체감온도 누적 변화 추이")
                 history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
                 if not history_df.empty:
