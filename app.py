@@ -35,45 +35,79 @@ st.markdown("""
 # 2. 강력한 데이터 정제 및 유연한 컬럼 매핑 엔진 
 # ==========================================
 
-def standardize_site_name(name):
-    # 1. 공백 완벽 제거
-    name = str(name).replace(' ', '')
+@st.cache_data(ttl=60)
+def get_valid_db_names():
+    """DB.csv에서 기준이 되는 현장명 리스트를 먼저 학습하여 추출합니다."""
+    try:
+        db_df = pd.read_csv('DB.csv', encoding='cp949')
+    except:
+        try:
+            db_df = pd.read_csv('DB.csv', encoding='utf-8')
+        except:
+            return []
+            
+    if '현장명' in db_df.columns:
+        # DB 현장명들을 1차적으로 표준화하여 기준 리스트 생성
+        return db_df['현장명'].dropna().apply(standardize_site_name_base).unique().tolist()
+    return []
+
+
+def standardize_site_name_base(name):
+    """(1단계 정제) 공백, 자음/모음 오타 제거 및 기본 매핑을 수행합니다."""
+    # 💡 [핵심] 정규식을 통해 모든 공백 및 단독 자음/모음(ㄴ, ㅇㅇ, ㅋㅋ 등) 완벽 제거 ('센ㄴ터' -> '센터')
+    name = re.sub(r'[ㄱ-ㅎㅏ-ㅣ\s]', '', str(name))
     
-    # 2. 특정 사업장명 최우선 강제 통일 (오타 및 변형 방지)
+    # 하드코딩 예외 우선 처리
     early_mapping = {
         '서울보증': '서울보증보험',
         '경주교원드림센터': '교원경주드림센터',
         '교원경주드림': '교원경주드림센터',
         '경주교원드림': '교원경주드림센터',
         '가든5툴': '가든파이브툴',               
-        '가든5툴백상코퍼레이션': '가든파이브툴',   # 💡 추가된 강제 매핑 
+        '가든5툴백상코퍼레이션': '가든파이브툴',
         '가든파이툴': '가든파이브툴',             
-        '쿠팡경산1,2센터': '쿠팡경산1,2FC'
+        '쿠팡경산1,2센터': '쿠팡경산1,2FC',
+        '쿠팡경산1,2': '쿠팡경산1,2FC'
     }
     name = early_mapping.get(name, name)
     
-    # 강제 통일된 사업장명은 뒷부분의 문자열 교체 로직을 패스하고 바로 반환 (안전장치)
+    # 이미 목표 이름으로 변환되었다면 후속 로직 생략
     if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2FC']:
         return name
 
-    # 3. 불필요한 접미사 제거 및 오타 교정
+    # 불필요한 접미사 제거 및 오타 교정
     name = name.replace('빌딩', '').replace('타워', '').replace('현장', '').replace('지점', '')
     name = name.replace('샌타', '센터')
     
-    # 4. '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
+    # '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
     exclusions = ["경주드림", "월미도물류", "인천국제", "사사", "인천택배", "페덱스", "성수", "가평", "경산", "인큐베이팅"]
     
-    # 5. 예외 목록에 포함되지 않은 경우에만 '센터'를 'FC'로 일괄 변경
     if not any(ext in name for ext in exclusions):
         name = name.replace('센터', 'FC')
         
-    # 6. 기타 약칭 매핑
     name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
     return name_mapping.get(name, name)
 
 
+def standardize_site_name(name, valid_db_names):
+    """(2단계 정제) 1단계 정제된 이름을 바탕으로 DB 기준 이름 포함 여부를 확인하여 최종 통일합니다."""
+    name = standardize_site_name_base(name)
+    
+    # 💡 [핵심] DB 마스터 이름 포함 여부 확인 (스마트 매칭)
+    # 가장 긴 DB 이름부터 비교하여 ("LG에너지솔루션과천R&D캠퍼스"에서 "에너지솔루션과천" 발견 시 즉시 교체)
+    if valid_db_names:
+        for db_name in sorted(valid_db_names, key=len, reverse=True):
+            if db_name in name:
+                return db_name
+                
+    return name
+
+
+# 시스템 초기화 시 DB 기준 이름 리스트 튜플 생성 (캐시 안정성 확보)
+valid_db_names_tuple = tuple(get_valid_db_names())
+
 @st.cache_data(ttl=60)
-def load_data():
+def load_data(valid_db_names):
     try:
         df = pd.read_csv('data.csv', encoding='cp949')
     except:
@@ -120,8 +154,8 @@ def load_data():
         if rc not in df.columns:
             df[rc] = ""
             
-    # 사업장명 통일 함수 적용
-    df['사업장명'] = df['사업장명'].apply(standardize_site_name)
+    # 사업장명 스마트 2단계 통일 로직 적용
+    df['사업장명'] = df['사업장명'].apply(lambda x: standardize_site_name(x, valid_db_names))
     df['참여자'] = df['참여자'].astype(str)
     
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
@@ -132,7 +166,7 @@ def load_data():
     return df
 
 @st.cache_data(ttl=60)
-def load_db_data():
+def load_db_data(valid_db_names):
     try:
         db_df = pd.read_csv('DB.csv', encoding='cp949')
     except:
@@ -143,20 +177,20 @@ def load_db_data():
     else:
         return pd.DataFrame()
         
-    # DB 마스터 파일에도 동일하게 통일 함수 적용 (매칭률 100% 보장)
-    db_df['표준현장명'] = db_df['현장명'].apply(standardize_site_name)
+    # DB 마스터 파일에도 동일하게 스마트 통일 함수 적용 (매칭률 100% 보장)
+    db_df['표준현장명'] = db_df['현장명'].apply(lambda x: standardize_site_name(x, valid_db_names))
     
     return db_df
 
 
-raw_df = load_data()
+raw_df = load_data(valid_db_names_tuple)
 raw_df['비교용_날짜'] = raw_df['날짜_dt'].dt.date
 
 # 당일 중복 제출 방지 및 최고 온도 데이터 우선 추출 로직
 raw_df = raw_df.sort_values(by='체감온도_수치', ascending=False)
 raw_df = raw_df.drop_duplicates(subset=['비교용_날짜', '사업장명'], keep='first').reset_index(drop=True)
 
-db_master = load_db_data()
+db_master = load_db_data(valid_db_names_tuple)
 
 # ==========================================
 # 3. 사이드바 구성 및 기준일 셋팅
