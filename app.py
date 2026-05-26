@@ -75,40 +75,28 @@ def load_data():
         
     mapping = {}
     
-    # 12대 주요 지표 컬럼 키워드 매핑
     c_reporter = find_col(['참여자', '작성자'])
     if c_reporter: mapping[c_reporter] = '참여자'
-    
     c_name = find_col(['사업장 명', '사업장명', '지점명'])
     if c_name: mapping[c_name] = '사업장명'
-    
     c_date = find_col(['날짜'])
     if c_date: mapping[c_date] = '날짜'
-    
     c_temp = find_col(['체감\'온도', '체감온도', '기온'])
     if c_temp: mapping[c_temp] = '체감온도'
-    
     c_warn = find_col(['폭염 특보', '폭염특보'])
     if c_warn: mapping[c_warn] = '폭염특보여부'
-    
     c_p1 = find_col(['예방조치', '1단계', '평상시조치'])
     if c_p1: mapping[c_p1] = '평상시조치'
-    
     c_p2 = find_col(['35도이상', '2단계'])
     if c_p2: mapping[c_p2] = '35도이상조치'
-    
     c_p3 = find_col(['38도이상', '3단계'])
     if c_p3: mapping[c_p3] = '38도이상조치'
-    
     c_beverage = find_col(['음료', '깨끗한 물', '식수'])
     if c_beverage: mapping[c_beverage] = '음료제공방식'
-    
     c_sensitive = find_col(['민감군'])
     if c_sensitive: mapping[c_sensitive] = '민감군관리'
-    
     c_emergency = find_col(['응급조치숙지', '응급조치에 대해', '응급상황 행동'])
     if c_emergency: mapping[c_emergency] = '응급조치숙지'
-    
     c_notes = find_col(['기타 점검', '특이사항', '종합의견'])
     if c_notes: mapping[c_notes] = '특이사항'
     
@@ -145,13 +133,11 @@ def load_db_data():
     except:
         db_df = pd.read_csv('DB.csv', encoding='utf-8')
         
-    # 필요한 컬럼만 추출 및 결측치 제거
     if '관리팀' in db_df.columns and '현장명' in db_df.columns:
         db_df = db_df[['관리팀', '현장명']].dropna(subset=['관리팀', '현장명']).copy()
     else:
         return pd.DataFrame()
         
-    # data.csv와 동일한 표준화 로직 적용 (매칭률 극대화)
     db_df['표준현장명'] = db_df['현장명'].astype(str).str.replace(' ', '', regex=False)
     db_df['표준현장명'] = db_df['표준현장명'].str.replace('빌딩', '', regex=False)
     db_df['표준현장명'] = db_df['표준현장명'].str.replace('타워', '', regex=False)
@@ -166,6 +152,13 @@ def load_db_data():
 
 raw_df = load_data()
 raw_df['비교용_날짜'] = raw_df['날짜_dt'].dt.date
+
+# 💡 [핵심 개선] 당일 중복 제출 방지 및 최고 온도 데이터 우선 추출 로직
+# 1. 체감온도 기준으로 내림차순 정렬 (가장 높은 온도가 위로 오도록)
+raw_df = raw_df.sort_values(by='체감온도_수치', ascending=False)
+# 2. 날짜와 사업장명이 동일한 데이터가 있다면, 맨 위에 있는(온도가 가장 높은) 1개만 남기고 중복 삭제
+raw_df = raw_df.drop_duplicates(subset=['비교용_날짜', '사업장명'], keep='first').reset_index(drop=True)
+
 db_master = load_db_data()
 
 # ==========================================
@@ -207,7 +200,6 @@ if 'search_query' not in st.session_state:
 if 'expanded_site' not in st.session_state:
     st.session_state.expanded_site = None
 
-# 상단 가로 배치 탭 버튼 구현 (3개로 확장)
 col_tab1, col_tab2, col_tab3 = st.columns(3)
 with col_tab1:
     if st.button("📊 총괄 브리핑", use_container_width=True, type="primary" if st.session_state.current_tab == "📊 총괄 브리핑" else "secondary"):
@@ -327,9 +319,6 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         else:
             st.success("✅ 금일 기준 체감온도 33℃ 이상인 우려 사업장이 없습니다.")
             
-        st.markdown("---")
-        # 기존 통계 영역 (유지)
-        
     else:
         st.info("ℹ️ 선택한 기준일에 제출된 현장 점검 데이터가 없습니다.")
 
@@ -381,6 +370,15 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                             <div style="font-size: 13px; color: #475569; font-style: italic;">"{notes_text}"</div>
                         </div>
                     """, unsafe_allow_html=True)
+                
+                st.markdown("#### 📈 체감온도 누적 변화 추이")
+                # 누적 추이 차트에서도 중복 제거된 데이터를 활용하므로 가장 높은 온도의 점 1개만 매일매일 깔끔하게 이어집니다.
+                history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
+                if not history_df.empty:
+                    fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
+                    fig.update_traces(line_color="#e11d48", line_width=3, textposition="top center", texttemplate='%{text:.1f}℃')
+                    fig.update_layout(xaxis=dict(tickformat="%m-%d"), yaxis=dict(title="", automargin=True), height=250, margin=dict(l=80, r=10, t=40, b=10))
+                    st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
 
 # ------------------------------------------
 # MODE 3: 팀별 제출 현황 (DB 연동)
@@ -392,14 +390,11 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
     if db_master.empty:
         st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 컬럼이 존재하지 않습니다. 파일을 확인해주세요.")
     else:
-        # 오늘 제출된 현장 목록 가져오기 (비교용 표준화 수행됨)
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
 
-        # 타겟 관리팀 설정
         target_teams = ['관리1팀', '관리2팀', '관리3팀', '영업2본부']
         
-        # 전체 통계 표시용
         col_t1, col_t2, col_t3, col_t4 = st.columns(4)
         for i, team in enumerate(target_teams):
             team_df = db_master[db_master['관리팀'] == team]
