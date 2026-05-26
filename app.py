@@ -58,6 +58,24 @@ st.markdown("""
 # ==========================================
 # 2. 강력한 데이터 정제 및 유연한 컬럼 매핑 엔진 
 # ==========================================
+
+# 💡 [핵심 개선] 사업장명 통합 표준화 함수 (예외 키워드 적용)
+def standardize_site_name(name):
+    name = str(name).replace(' ', '')
+    name = name.replace('빌딩', '').replace('타워', '').replace('현장', '').replace('지점', '')
+    name = name.replace('샌타', '센터') # 오타 우선 교정
+    
+    # '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
+    exclusions = ["경주드림", "월미도물류", "인천국제", "사사", "인천택배", "페덱스", "성수", "가평", "경산", "인큐베이팅"]
+    
+    # 예외 목록에 포함되지 않은 경우에만 '센터'를 'FC'로 변경
+    if not any(ext in name for ext in exclusions):
+        name = name.replace('센터', 'FC')
+        
+    name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
+    return name_mapping.get(name, name)
+
+
 @st.cache_data(ttl=60)
 def load_data():
     try:
@@ -107,17 +125,9 @@ def load_data():
         if rc not in df.columns:
             df[rc] = ""
             
-    df['사업장명'] = df['사업장명'].astype(str).str.replace(' ', '', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('빌딩', '', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('타워', '', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('현장', '', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('지점', '', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('센터', 'FC', regex=False)
-    df['사업장명'] = df['사업장명'].str.replace('샌타', 'FC', regex=False)
+    # 새로 만든 함수를 통해 사업장명 표준화 및 예외처리 적용
+    df['사업장명'] = df['사업장명'].apply(standardize_site_name)
     df['참여자'] = df['참여자'].astype(str)
-    
-    name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
-    df['사업장명'] = df['사업장명'].replace(name_mapping)
     
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
@@ -138,25 +148,17 @@ def load_db_data():
     else:
         return pd.DataFrame()
         
-    db_df['표준현장명'] = db_df['현장명'].astype(str).str.replace(' ', '', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('빌딩', '', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('타워', '', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('현장', '', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('지점', '', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('센터', 'FC', regex=False)
-    db_df['표준현장명'] = db_df['표준현장명'].str.replace('샌타', 'FC', regex=False)
-    name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
-    db_df['표준현장명'] = db_df['표준현장명'].replace(name_mapping)
+    # DB 데이터에도 동일한 사업장명 예외처리 함수 일괄 적용
+    db_df['표준현장명'] = db_df['현장명'].apply(standardize_site_name)
     
     return db_df
+
 
 raw_df = load_data()
 raw_df['비교용_날짜'] = raw_df['날짜_dt'].dt.date
 
-# 💡 [핵심 개선] 당일 중복 제출 방지 및 최고 온도 데이터 우선 추출 로직
-# 1. 체감온도 기준으로 내림차순 정렬 (가장 높은 온도가 위로 오도록)
+# 당일 중복 제출 방지 및 최고 온도 데이터 우선 추출 로직
 raw_df = raw_df.sort_values(by='체감온도_수치', ascending=False)
-# 2. 날짜와 사업장명이 동일한 데이터가 있다면, 맨 위에 있는(온도가 가장 높은) 1개만 남기고 중복 삭제
 raw_df = raw_df.drop_duplicates(subset=['비교용_날짜', '사업장명'], keep='first').reset_index(drop=True)
 
 db_master = load_db_data()
@@ -372,7 +374,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     """, unsafe_allow_html=True)
                 
                 st.markdown("#### 📈 체감온도 누적 변화 추이")
-                # 누적 추이 차트에서도 중복 제거된 데이터를 활용하므로 가장 높은 온도의 점 1개만 매일매일 깔끔하게 이어집니다.
                 history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
                 if not history_df.empty:
                     fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
