@@ -53,7 +53,7 @@ def standardize_site_name(name):
     name = early_mapping.get(name, name)
     
     # 강제 통일된 사업장명은 뒷부분의 문자열 교체 로직을 패스하고 바로 반환 (안전장치)
-    if name in ['교원경주드림센터', '서울보증보험', '가든파이툴', '쿠팡경산1,2FC']:
+    if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2FC']:
         return name
 
     # 3. 불필요한 접미사 제거 및 오타 교정
