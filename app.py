@@ -72,7 +72,7 @@ def standardize_site_name_base(name):
     name = early_mapping.get(name, name)
     
     # 이미 목표 이름으로 변환되었다면 후속 로직 생략
-    if name in ['교원경주드림센터', '뉴파워프라즈마마곡신기술센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2FC']:
+    if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2FC']:
         return name
 
     # 불필요한 접미사 제거 및 오타 교정
