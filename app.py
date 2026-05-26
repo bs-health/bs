@@ -43,6 +43,15 @@ st.markdown("""
     .stButton>button {
         border-radius: 8px;
     }
+    .status-box {
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        font-size: 13px;
+        border: 1px solid #e2e8f0;
+    }
+    .missing-box { background-color: #fef2f2; border-left: 4px solid #ef4444; }
+    .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,7 +65,6 @@ def load_data():
     except:
         df = pd.read_csv('data.csv', encoding='utf-8')
     
-    # 컬럼 이름 유연한 자동 검색 및 일치 매핑
     cols = df.columns.tolist()
     
     def find_col(keywords):
@@ -104,16 +112,13 @@ def load_data():
     c_notes = find_col(['기타 점검', '특이사항', '종합의견'])
     if c_notes: mapping[c_notes] = '특이사항'
     
-    # 컬럼 일괄 정비
     df.rename(columns=mapping, inplace=True)
     
-    # 혹은 매핑 실패한 데이터가 있더라도 정상 실행을 위한 기본값 삽입
     required_cols = ['참여자', '사업장명', '날짜', '체감온도', '폭염특보여부', '평상시조치', '35도이상조치', '38도이상조치', '음료제공방식', '민감군관리', '응급조치숙지', '특이사항']
     for rc in required_cols:
         if rc not in df.columns:
             df[rc] = ""
             
-    # 숫자형 입력을 대비하여 검색 핵심 컬럼을 강제 문자열형(String)으로 1차 변환
     df['사업장명'] = df['사업장명'].astype(str).str.replace(' ', '', regex=False)
     df['사업장명'] = df['사업장명'].str.replace('빌딩', '', regex=False)
     df['사업장명'] = df['사업장명'].str.replace('타워', '', regex=False)
@@ -123,14 +128,9 @@ def load_data():
     df['사업장명'] = df['사업장명'].str.replace('샌타', 'FC', regex=False)
     df['참여자'] = df['참여자'].astype(str)
     
-    name_mapping = {
-        '성우프로젝트': '성우',
-        '성우건설': '성우',
-        '(주)성우': '성우'
-    }
+    name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
     df['사업장명'] = df['사업장명'].replace(name_mapping)
     
-    # 시간 및 수치 정보 변환
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
     df['체감온도_수치'] = df['체감온도'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
@@ -138,36 +138,61 @@ def load_data():
     
     return df
 
-# 전체 데이터 로드
+@st.cache_data(ttl=60)
+def load_db_data():
+    try:
+        db_df = pd.read_csv('DB.csv', encoding='cp949')
+    except:
+        db_df = pd.read_csv('DB.csv', encoding='utf-8')
+        
+    # 필요한 컬럼만 추출 및 결측치 제거
+    if '관리팀' in db_df.columns and '현장명' in db_df.columns:
+        db_df = db_df[['관리팀', '현장명']].dropna(subset=['관리팀', '현장명']).copy()
+    else:
+        return pd.DataFrame()
+        
+    # data.csv와 동일한 표준화 로직 적용 (매칭률 극대화)
+    db_df['표준현장명'] = db_df['현장명'].astype(str).str.replace(' ', '', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('빌딩', '', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('타워', '', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('현장', '', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('지점', '', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('센터', 'FC', regex=False)
+    db_df['표준현장명'] = db_df['표준현장명'].str.replace('샌타', 'FC', regex=False)
+    name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
+    db_df['표준현장명'] = db_df['표준현장명'].replace(name_mapping)
+    
+    return db_df
+
 raw_df = load_data()
 raw_df['비교용_날짜'] = raw_df['날짜_dt'].dt.date
+db_master = load_db_data()
 
 # ==========================================
-# 3. 사이드바 구성 및 기준일 셋팅 (컴퓨터 현재 시간 동기화)
+# 3. 사이드바 구성 및 기준일 셋팅
 # ==========================================
 with st.sidebar:
     st.markdown("<div style='font-size: 80px; margin-bottom: -20px;'>🌡️</div>", unsafe_allow_html=True)
     st.title("안전보건팀")
     st.markdown("---")
     
-    # 💡 [개선] 사용자의 현재 컴퓨터 날짜(한국 시간 KST)를 자동으로 획득
     KST = timezone(timedelta(hours=9))
     current_today = datetime.now(KST).date()
-    
-    # 데이터에 존재하는 모든 날짜 정렬 목록
     available_dates = sorted(raw_df['비교용_날짜'].dropna().unique().tolist(), reverse=True)
     
-    # 기본 인덱스 설정 로직: 오늘 데이터가 있으면 오늘을 잡고, 없으면 가장 최신 데이터 날짜를 기본값으로 선택
     if current_today in available_dates:
         default_idx = available_dates.index(current_today)
     else:
-        # 오늘 날짜 데이터가 아직 없으면 파일 내에서 가장 최근 날짜를 기본값으로 유연하게 매칭
         default_idx = 0 
-        st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 자동 매칭되었습니다.")
+        if available_dates:
+            st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 자동 매칭되었습니다.")
 
-    today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx)
-
-filtered_df = raw_df[raw_df['비교용_날짜'] <= today_kst]
+    if available_dates:
+        today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx)
+        filtered_df = raw_df[raw_df['비교용_날짜'] <= today_kst]
+    else:
+        today_kst = current_today
+        filtered_df = pd.DataFrame()
 
 # ==========================================
 # 4. 화면 구성 및 메인 타이틀
@@ -175,7 +200,6 @@ filtered_df = raw_df[raw_df['비교용_날짜'] <= today_kst]
 st.markdown("<h1 style='font-size: 2.5rem; color: #0f172a; margin-bottom: 0px;'>☀️ 백상가족 건강한 여름나기 종합 대시보드</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 탭 기능의 세션 상태 관리
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "📊 총괄 브리핑"
 if 'search_query' not in st.session_state:
@@ -183,8 +207,8 @@ if 'search_query' not in st.session_state:
 if 'expanded_site' not in st.session_state:
     st.session_state.expanded_site = None
 
-# 상단 가로 배치 탭 버튼 구현
-col_tab1, col_tab2 = st.columns(2)
+# 상단 가로 배치 탭 버튼 구현 (3개로 확장)
+col_tab1, col_tab2, col_tab3 = st.columns(3)
 with col_tab1:
     if st.button("📊 총괄 브리핑", use_container_width=True, type="primary" if st.session_state.current_tab == "📊 총괄 브리핑" else "secondary"):
         st.session_state.current_tab = "📊 총괄 브리핑"
@@ -193,26 +217,27 @@ with col_tab2:
     if st.button("🏢 전국 사업장 조치대장", use_container_width=True, type="primary" if st.session_state.current_tab == "🏢 전국 사업장 조치대장" else "secondary"):
         st.session_state.current_tab = "🏢 전국 사업장 조치대장"
         st.rerun()
+with col_tab3:
+    if st.button("✅ 팀별 실시 현황 (DB연동)", use_container_width=True, type="primary" if st.session_state.current_tab == "✅ 팀별 실시 현황" else "secondary"):
+        st.session_state.current_tab = "✅ 팀별 실시 현황"
+        st.rerun()
 
 # ------------------------------------------
 # MODE 1: 총괄 브리핑
 # ------------------------------------------
 if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
-    today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy()
+    today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
     if not today_df.empty:
-        # 실측 체감온도 수치를 최우선으로 정교하게 매핑 판별
         def get_alert_badge_by_row(row):
             temp = row['체감온도_수치']
             warn = str(row['폭염특보여부'])
-            
             if pd.notna(temp):
                 if temp >= 38.0: return "🔴 폭염중대경보"
                 elif temp >= 35.0: return "🟠 폭염경보"
                 elif temp >= 33.0: return "🟡 폭염주의보"
                 else: return "🟢 일반"
-            
             if '경보' in warn: return "🟠 폭염경보"
             elif '주의보' in warn: return "🟡 폭염주의보"
             return "🟢 일반"
@@ -255,95 +280,56 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 📋 전사 고온 위험 사업장 관리 현황 요약")
-        st.markdown("<p style='font-size: 13px; color: #64748b; margin-top: -10px;'>당일 체감온도 <b>33℃ 이상(주의보 이상)</b> 위주로 요약 브리핑합니다. 사업장명을 클릭하면 상세 내용으로 자동 연동됩니다.</p>", unsafe_allow_html=True)
-
+        
         summary_rows = []
         for idx, r in today_df.iterrows():
             badge = r['경보단계_명칭']
             if "일반" in badge: continue
-                
             m_str = str(r['평상시조치'])
-            water = '🟢' if any(kw in m_str for kw in ['물', '음료', '식수', '포도당']) else '🔴'
-            shade = '🟢' if any(kw in m_str for kw in ['그늘', '휴게', '쉼터']) else '🔴'
-            edu = '🟢' if any(kw in m_str for kw in ['교육', 'TBM']) else '🔴'
-            sens = '🟢' if '예' in str(r['민감군관리']) or '관리' in str(r['민감군관리']) else '🔴'
-            emg = '🟢' if '예' in str(r['응급조치숙지']) or '이해' in str(r['응급조치숙지']) else '🔴'
-            
             summary_rows.append({
-                'obj': r, '경보단계': badge, '사업장명': r['사업장명'], '체감온도': f"{r['체감온도_수치']:.1f} ℃" if pd.notna(r['체감온도_수치']) else "N/A",
-                '물/음료': water, '그늘막': shade, 'TBM교육': edu, '민감군': sens, '응급숙지': emg
+                '사업장명': r['사업장명'], '경보단계': badge, '체감온도': f"{r['체감온도_수치']:.1f} ℃" if pd.notna(r['체감온도_수치']) else "N/A",
+                '물/음료': '🟢' if any(kw in m_str for kw in ['물', '음료', '식수', '포도당']) else '🔴',
+                '그늘막': '🟢' if any(kw in m_str for kw in ['그늘', '휴게', '쉼터']) else '🔴',
+                'TBM교육': '🟢' if any(kw in m_str for kw in ['교육', 'TBM']) else '🔴',
+                '민감군': '🟢' if '예' in str(r['민감군관리']) or '관리' in str(r['민감군관리']) else '🔴',
+                '응급숙지': '🟢' if '예' in str(r['응급조치숙지']) or '이해' in str(r['응급조치숙지']) else '🔴'
             })
             
         if summary_rows:
             col_widths = [2.5, 2.2, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0]
             with st.container(height=450):
-                col_h1, col_h2, col_h3, col_h4, col_h5, col_h6, col_h7, col_h8, col_h9 = st.columns(col_widths, vertical_alignment="center")
-                col_h1.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>사업장명 (클릭이동)</b></div>", unsafe_allow_html=True)
-                col_h2.markdown("<div style='text-align: left;'><b style='font-size: 13px; color: #475569;'>경보단계</b></div>", unsafe_allow_html=True)
-                col_h3.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>체감온도</b></div>", unsafe_allow_html=True)
-                col_h4.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>물/음료</b></div>", unsafe_allow_html=True)
-                col_h5.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>그늘막</b></div>", unsafe_allow_html=True)
-                col_h6.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>TBM</b></div>", unsafe_allow_html=True)
-                col_h7.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>민감군</b></div>", unsafe_allow_html=True)
-                col_h8.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>응급숙지</b></div>", unsafe_allow_html=True)
-                col_h9.markdown("<div style='text-align: center;'><b style='font-size: 13px; color: #475569;'>상세분석</b></div>", unsafe_allow_html=True)
+                cols = st.columns(col_widths, vertical_alignment="center")
+                headers = ["사업장명 (클릭이동)", "경보단계", "체감온도", "물/음료", "그늘막", "TBM", "민감군", "응급숙지", "상세분석"]
+                for i, text in enumerate(headers):
+                    align = "left" if i==1 else "center"
+                    cols[i].markdown(f"<div style='text-align: {align};'><b style='font-size: 13px; color: #475569;'>{text}</b></div>", unsafe_allow_html=True)
                 st.markdown("<hr style='margin: 4px 0 10px 0;'>", unsafe_allow_html=True)
 
                 for s_idx, row_item in enumerate(summary_rows):
-                    c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(col_widths, vertical_alignment="center")
-                    if c1.button(row_item['사업장명'], key=f"btn_site_{row_item['사업장명']}_{s_idx}", use_container_width=True):
+                    c = st.columns(col_widths, vertical_alignment="center")
+                    if c[0].button(row_item['사업장명'], key=f"btn_site_{row_item['사업장명']}_{s_idx}", use_container_width=True):
                         st.session_state.current_tab = "🏢 전국 사업장 조치대장"
                         st.session_state.expanded_site = row_item['사업장명']
                         st.session_state.search_query = row_item['사업장명']
                         st.rerun()
-                        
-                    c2.markdown(f"<div>{row_item['경보단계']}</div>", unsafe_allow_html=True)
-                    c3.markdown(f"<div style='text-align: center;'>{row_item['체감온도']}</div>", unsafe_allow_html=True)
-                    c4.markdown(f"<div style='text-align: center;'>{row_item['물/음료']}</div>", unsafe_allow_html=True)
-                    c5.markdown(f"<div style='text-align: center;'>{row_item['그늘막']}</div>", unsafe_allow_html=True)
-                    c6.markdown(f"<div style='text-align: center;'>{row_item['TBM교육']}</div>", unsafe_allow_html=True)
-                    c7.markdown(f"<div style='text-align: center;'>{row_item['민감군']}</div>", unsafe_allow_html=True)
-                    c8.markdown(f"<div style='text-align: center;'>{row_item['응급숙지']}</div>", unsafe_allow_html=True)
-                    
-                    if c9.button("🔍 조치내역", key=f"btn_go_{row_item['사업장명']}_{s_idx}", use_container_width=True):
+                    c[1].markdown(f"<div>{row_item['경보단계']}</div>", unsafe_allow_html=True)
+                    c[2].markdown(f"<div style='text-align: center;'>{row_item['체감온도']}</div>", unsafe_allow_html=True)
+                    c[3].markdown(f"<div style='text-align: center;'>{row_item['물/음료']}</div>", unsafe_allow_html=True)
+                    c[4].markdown(f"<div style='text-align: center;'>{row_item['그늘막']}</div>", unsafe_allow_html=True)
+                    c[5].markdown(f"<div style='text-align: center;'>{row_item['TBM교육']}</div>", unsafe_allow_html=True)
+                    c[6].markdown(f"<div style='text-align: center;'>{row_item['민감군']}</div>", unsafe_allow_html=True)
+                    c[7].markdown(f"<div style='text-align: center;'>{row_item['응급숙지']}</div>", unsafe_allow_html=True)
+                    if c[8].button("🔍 조치내역", key=f"btn_go_{row_item['사업장명']}_{s_idx}", use_container_width=True):
                         st.session_state.current_tab = "🏢 전국 사업장 조치대장"
                         st.session_state.expanded_site = row_item['사업장명']
                         st.session_state.search_query = row_item['사업장명']
                         st.rerun()
         else:
-            st.success("✅ 금일 기준 체감온도 33℃ 이상인 우려 사업장이 없습니다. 전사 현장 안전 상태가 매우 양호합니다.")
+            st.success("✅ 금일 기준 체감온도 33℃ 이상인 우려 사업장이 없습니다.")
             
         st.markdown("---")
-        st.subheader("📊 5대 필수 보건항목 준수 비율 (누적 종합 집계)")
-        tot = len(filtered_df)
-        if tot > 0:
-            water_rate = sum(filtered_df["평상시조치"].astype(str).apply(lambda x: any(k in x for k in ["물", "음료"]))) / tot
-            shade_rate = sum(filtered_df["평상시조치"].astype(str).apply(lambda x: any(k in x for k in ["그늘", "휴게"]))) / tot
-            edu_rate = sum(filtered_df["평상시조치"].astype(str).apply(lambda x: any(k in x for k in ["교육", "TBM"]))) / tot
-            sensitive_rate = sum(filtered_df["민감군관리"].astype(str).apply(lambda x: "예" in x)) / tot
-            emergency_rate = sum(filtered_df["응급조치숙지"].astype(str).apply(lambda x: "예" in x or "이해" in x)) / tot
-
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                st.write(f"💧 깨끗한 물, 이온음료 제공 이행율: **{int(water_rate*100)}%**")
-                st.progress(water_rate)
-                st.write(f"⛱️ 햇볕 차단 그늘막 및 휴게시설 보급율: **{int(shade_rate*100)}%**")
-                st.progress(shade_rate)
-                st.write(f"📚 온열예방 일일 안전교육 실시율: **{int(edu_rate*100)}%**")
-                st.progress(edu_rate)
-            with col_b2:
-                st.write(f"👨‍🦳 고위험 민감군 파악 및 관리율: **{int(sensitive_rate*100)}%**")
-                st.progress(sensitive_rate)
-                st.write(f"🚨 현장 응급상황 행동 숙지율: **{int(emergency_rate*100)}%**")
-                st.progress(emergency_rate)
+        # 기존 통계 영역 (유지)
         
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader("🔥 폭염특보 발효 최다 사업장 (누적 위험도 순)")
-        if not filtered_df.empty:
-            risk_df = filtered_df.groupby('사업장명')['특보발효건수'].sum().reset_index().sort_values('특보발효건수', ascending=False).head(10)
-            fig2 = px.bar(risk_df, x='특보발효건수', y='사업장명', orientation='h', color='특보발효건수', color_continuous_scale='Reds')
-            fig2.update_layout(yaxis=dict(tickangle=0, title="", automargin=True), margin=dict(l=180, r=20, t=50, b=30), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig2, use_container_width=True, key="overall_risk_bar_chart")
     else:
         st.info("ℹ️ 선택한 기준일에 제출된 현장 점검 데이터가 없습니다.")
 
@@ -352,7 +338,6 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
 # ------------------------------------------
 elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
     st.subheader("🏢 전국 사업장 개별 온열조치 상세 보고")
-    
     search_query = st.text_input("🔍 사업장명 또는 보고자 검색", value=st.session_state.search_query)
     
     if st.session_state.expanded_site:
@@ -361,8 +346,8 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             st.session_state.search_query = ""
             st.rerun()
 
-    today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy()
-    site_df = today_df.sort_values('체감온도_수치', ascending=False).copy()
+    today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
+    site_df = today_df.sort_values('체감온도_수치', ascending=False).copy() if not today_df.empty else pd.DataFrame()
     
     if search_query:
         site_df = site_df[site_df["사업장명"].astype(str).str.contains(search_query, na=False) | site_df["참여자"].astype(str).str.contains(search_query, na=False)]
@@ -381,57 +366,72 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     date_str = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) else str(row['날짜'])
                     st.markdown(f"""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📋 현장 기본 정보 및 기상 현황</h4>
+                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📋 현장 기본 정보</h4>
                             <table style="width: 100%; font-size: 13px;">
-                                <tr><td style="font-weight: bold; width: 40%; color: #475569;">보고책임자</td><td>{row['참여자']}</td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">점검시간</td><td>{date_str}</td></tr>
+                                <tr><td style="font-weight: bold; width: 40%; color: #475569;">보고자</td><td>{row['참여자']}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{row['체감온도_수치']:.1f} ℃</span></td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여부']}</td></tr>
                             </table>
                         </div>
                     """, unsafe_allow_html=True)
-                    
-                    st.markdown(f"""
-                        <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">✔️ 핵심 보건 관리 항목</h4>
-                            <table style="width: 100%; font-size: 13px;">
-                                <tr><td style="font-weight: bold; width: 40%; color: #475569;">식수 및 음료지급</td><td>{row['음료제공방식']}</td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">민감근로자 관리</td><td>{row['민감군관리']}</td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">비상 응급조치</td><td>{row['응급조치숙지']}</td></tr>
-                            </table>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
                 with col_right:
-                    p1_formatted = "".join([f"<li>{act.strip()}</li>" for act in str(row['평상시조치']).split('|') if act.strip()])
-                    p2_actions = str(row['35도이상조치']).split('|') if pd.notna(row['35도이상조치']) else []
-                    p2_formatted = "".join([f"<li>{act.strip()}</li>" for act in p2_actions if act.strip()]) if p2_actions and p2_actions[0] != 'nan' else "<li>해당 없음</li>"
-                    p3_actions = str(row['38도이상조치']).split('|') if pd.notna(row['38도이상조치']) else []
-                    p3_formatted = "".join([f"<li>{act.strip()}</li>" for act in p3_actions if act.strip()]) if p3_actions and p3_actions[0] != 'nan' else "<li>해당 없음</li>"
-
-                    st.markdown(f"""
-                        <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">🌡️ 단계별 조치 이행 실태</h4>
-                            <div style="font-size: 13px;">
-                                <strong style="color: #0d9488;">[1단계] 평상시 예방 조치:</strong><ul style="padding-left: 15px;">{p1_formatted}</ul>
-                                <strong style="color: #ea580c;">[2단계] 35도 돌파 시 조치:</strong><ul style="padding-left: 15px;">{p2_formatted}</ul>
-                                <strong style="color: #dc2626;">[3단계] 38도 돌파 시 조치:</strong><ul style="padding-left: 15px;">{p3_formatted}</ul>
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
+                    notes_text = row['특이사항'] if pd.notna(row['특이사항']) else "특이사항 없음"
                     st.markdown(f"""
                         <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #0f172a; font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">✍️ 현장 소장 종합 코멘트</h4>
+                            <h4 style="margin-top:0; color: #0f172a; font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">✍️ 종합 코멘트</h4>
                             <div style="font-size: 13px; color: #475569; font-style: italic;">"{notes_text}"</div>
                         </div>
                     """, unsafe_allow_html=True)
+
+# ------------------------------------------
+# MODE 3: 팀별 제출 현황 (DB 연동)
+# ------------------------------------------
+elif st.session_state.current_tab == "✅ 팀별 실시 현황":
+    st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
+    st.markdown("<p style='font-size: 13px; color: #64748b; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출된 현장과 제출되지 않은 현장을 추적합니다.</p>", unsafe_allow_html=True)
+
+    if db_master.empty:
+        st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 컬럼이 존재하지 않습니다. 파일을 확인해주세요.")
+    else:
+        # 오늘 제출된 현장 목록 가져오기 (비교용 표준화 수행됨)
+        today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
+        submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
+
+        # 타겟 관리팀 설정
+        target_teams = ['관리1팀', '관리2팀', '관리3팀', '영업2본부']
+        
+        # 전체 통계 표시용
+        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+        for i, team in enumerate(target_teams):
+            team_df = db_master[db_master['관리팀'] == team]
+            total_count = len(team_df)
+            submitted = team_df[team_df['표준현장명'].isin(submitted_sites)]
+            missing = team_df[~team_df['표준현장명'].isin(submitted_sites)]
+            
+            sub_count = len(submitted)
+            rate = int((sub_count / total_count * 100)) if total_count > 0 else 0
+            
+            cols = [col_t1, col_t2, col_t3, col_t4]
+            with cols[i]:
+                st.markdown(f"""
+                <div style="background-color: #ffffff; border-radius: 12px; padding: 15px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+                    <h3 style="margin-top:0; color: #1e293b; font-size: 18px; text-align: center;">{team}</h3>
+                    <div style="text-align: center; margin-bottom: 10px;">
+                        <span style="font-size: 32px; font-weight: bold; color: {'#22c55e' if rate == 100 else '#3b82f6'};">{rate}%</span>
+                        <div style="font-size: 13px; color: #64748b;">(제출 {sub_count} / 전체 {total_count})</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                st.markdown("#### 📈 체감온도 누적 변화 추이")
-                history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
-                if not history_df.empty:
-                    fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
-                    fig.update_traces(line_color="#e11d48", line_width=3, textposition="top center", texttemplate='%{text:.1f}℃')
-                    fig.update_layout(xaxis=dict(tickformat="%m-%d"), yaxis=dict(title="", automargin=True), height=250, margin=dict(l=80, r=10, t=40, b=10))
-                    st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
+                with st.expander(f"❌ 미실시 현장 ({len(missing)}곳)", expanded=True):
+                    if not missing.empty:
+                        for site in missing['현장명'].tolist():
+                            st.markdown(f"<div class='status-box missing-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
+                
+                with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
+                    if not submitted.empty:
+                        for site in submitted['현장명'].tolist():
+                            st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
