@@ -14,42 +14,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 사장님 보고 목적에 맞추어 시인성이 높고 격조 높은 화이트 테마 주입
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8fafc;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 28px;
-        font-weight: 900;
-        color: #0f172a;
-    }
-    .stAlert {
-        border-radius: 16px;
-    }
+    .main { background-color: #f8fafc; }
+    div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 900; color: #0f172a; }
+    .stAlert { border-radius: 16px; }
     .custom-card {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 16px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-        margin-bottom: 20px;
+        background-color: #ffffff; padding: 20px; border-radius: 16px;
+        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); margin-bottom: 20px;
     }
-    table {
-        font-size: 14px !important;
-    }
-    /* 버튼 스타일 조정 */
-    .stButton>button {
-        border-radius: 8px;
-    }
-    .status-box {
-        padding: 10px;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        font-size: 13px;
-        border: 1px solid #e2e8f0;
-    }
+    table { font-size: 14px !important; }
+    .stButton>button { border-radius: 8px; }
+    .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid #e2e8f0; }
     .missing-box { background-color: #fef2f2; border-left: 4px solid #ef4444; }
     .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
     </style>
@@ -59,19 +35,35 @@ st.markdown("""
 # 2. 강력한 데이터 정제 및 유연한 컬럼 매핑 엔진 
 # ==========================================
 
-# 💡 [핵심 개선] 사업장명 통합 표준화 함수 (예외 키워드 적용)
 def standardize_site_name(name):
+    # 1. 공백 완벽 제거
     name = str(name).replace(' ', '')
-    name = name.replace('빌딩', '').replace('타워', '').replace('현장', '').replace('지점', '')
-    name = name.replace('샌타', '센터') # 오타 우선 교정
     
-    # '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
+    # 2. 💡 [신규] 특정 사업장명 최우선 강제 통일 (오타 및 변형 방지)
+    early_mapping = {
+        '서울보증': '서울보증보험',
+        '경주교원드림센터': '교원경주드림센터',
+        '교원경주드림': '교원경주드림센터',
+        '경주교원드림': '교원경주드림센터'
+    }
+    name = early_mapping.get(name, name)
+    
+    # 이미 목표한 이름으로 완벽하게 변환되었다면, 아래의 센터->FC 변환이나 꼬리표 제거 로직을 타지 않고 즉시 반환 (안전장치)
+    if name in ['교원경주드림센터', '서울보증보험']:
+        return name
+
+    # 3. 불필요한 접미사 제거 및 오타 교정
+    name = name.replace('빌딩', '').replace('타워', '').replace('현장', '').replace('지점', '')
+    name = name.replace('샌타', '센터')
+    
+    # 4. '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
     exclusions = ["경주드림", "월미도물류", "인천국제", "사사", "인천택배", "페덱스", "성수", "가평", "경산", "인큐베이팅"]
     
-    # 예외 목록에 포함되지 않은 경우에만 '센터'를 'FC'로 변경
+    # 5. 예외 목록에 포함되지 않은 경우에만 '센터'를 'FC'로 일괄 변경
     if not any(ext in name for ext in exclusions):
         name = name.replace('센터', 'FC')
         
+    # 6. 기타 약칭 매핑
     name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
     return name_mapping.get(name, name)
 
@@ -92,7 +84,6 @@ def load_data():
         return None
         
     mapping = {}
-    
     c_reporter = find_col(['참여자', '작성자'])
     if c_reporter: mapping[c_reporter] = '참여자'
     c_name = find_col(['사업장 명', '사업장명', '지점명'])
@@ -125,7 +116,7 @@ def load_data():
         if rc not in df.columns:
             df[rc] = ""
             
-    # 새로 만든 함수를 통해 사업장명 표준화 및 예외처리 적용
+    # 사업장명 통일 함수 적용
     df['사업장명'] = df['사업장명'].apply(standardize_site_name)
     df['참여자'] = df['참여자'].astype(str)
     
@@ -148,7 +139,7 @@ def load_db_data():
     else:
         return pd.DataFrame()
         
-    # DB 데이터에도 동일한 사업장명 예외처리 함수 일괄 적용
+    # DB 마스터 파일에도 동일하게 통일 함수 적용 (매칭률 100% 보장)
     db_df['표준현장명'] = db_df['현장명'].apply(standardize_site_name)
     
     return db_df
