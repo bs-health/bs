@@ -36,7 +36,7 @@ st.markdown("""
 # ==========================================
 
 def standardize_site_name(name):
-    # 1. 공백 완벽 제거
+    # 1. 공백 완벽 제거 ('가든 5툴' -> '가든5툴' / '쿠팡 경산 1, 2센터' -> '쿠팡경산1,2센터')
     name = str(name).replace(' ', '')
     
     # 2. 특정 사업장명 최우선 강제 통일 (오타 및 변형 방지)
@@ -44,11 +44,15 @@ def standardize_site_name(name):
         '서울보증': '서울보증보험',
         '경주교원드림센터': '교원경주드림센터',
         '교원경주드림': '교원경주드림센터',
-        '경주교원드림': '교원경주드림센터'
+        '경주교원드림': '교원경주드림센터',
+        '가든5툴': '가든파이툴',             # 요청하신 가든5툴 예외처리
+        '가든파이브툴': '가든파이툴',       # 혹시 모를 가든파이브툴 입력 대비
+        '쿠팡경산1,2센터': '쿠팡경산1,2FC'  # 요청하신 쿠팡 경산 처리
     }
     name = early_mapping.get(name, name)
     
-    if name in ['교원경주드림센터', '서울보증보험']:
+    # 강제 통일된 사업장명은 뒷부분의 문자열 교체 로직을 패스하고 바로 반환 (안전장치)
+    if name in ['교원경주드림센터', '서울보증보험', '가든파이툴', '쿠팡경산1,2FC']:
         return name
 
     # 3. 불필요한 접미사 제거 및 오타 교정
@@ -345,7 +349,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 col_left, col_right = st.columns(2)
                 
                 with col_left:
-                    # 💡 복구됨: 기본 정보 테이블
+                    # 기본 정보 테이블
                     date_str = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) else str(row['날짜'])
                     st.markdown(f"""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
@@ -359,7 +363,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                         </div>
                     """, unsafe_allow_html=True)
                     
-                    # 💡 복구됨: 핵심 보건 관리 항목(H~M열)
+                    # 핵심 보건 관리 항목(H~M열)
                     st.markdown(f"""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
                             <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">✔️ 핵심 보건 관리 항목</h4>
@@ -372,7 +376,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     """, unsafe_allow_html=True)
 
                 with col_right:
-                    # 💡 복구됨: 단계별 조치 실태 (1,2,3단계)
+                    # 단계별 조치 실태 (1,2,3단계)
                     p1_formatted = "".join([f"<li style='margin-bottom: 4px;'>{act.strip()}</li>" for act in str(row['평상시조치']).split('|') if act.strip()])
                     p2_actions = str(row['35도이상조치']).split('|') if pd.notna(row['35도이상조치']) else []
                     p2_formatted = "".join([f"<li style='margin-bottom: 4px;'>{act.strip()}</li>" for act in p2_actions if act.strip()]) if p2_actions and p2_actions[0] != 'nan' else "<li>해당 없음</li>"
@@ -390,7 +394,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                         </div>
                     """, unsafe_allow_html=True)
                     
-                    # 💡 복구됨: 특이사항 코멘트
+                    # 특이사항 코멘트
                     notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
                     st.markdown(f"""
                         <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
