@@ -1,56 +1,54 @@
-import csv
-from flask import Flask, render_template
+import streamlit as st
+import pandas as pd
 from rapidfuzz import process, fuzz, utils
 
-app = Flask(__name__)
+# 페이지 기본 설정 (와이드 모드)
+st.set_page_config(page_title="온열질환 점검 대시보드", layout="wide")
 
-# 데이터 로드 및 전처리 함수
-def load_data():
-    # 1. 정식 사업장 DB 로드 (소속 팀 정보 매핑용)
-    # { "정식사업장명": {"team": "관리1팀", "is_submitted": False}, ... }
-    db_sites = {}
-    with open('DB.csv', mode='r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            site_name = row['사업장명'].strip()
-            team_name = row['소속팀'].strip()
-            db_sites[site_name] = {
-                'team': team_name,
-                'is_submitted': False  # 기본값은 미제출
-            }
+st.title("☀️ 온열질환 예방점검 실시 현황")
+st.markdown("---")
 
-    # 퍼지 매칭을 위한 정식 사업장 이름 리스트 생성
+# 데이터 로드 및 퍼지 매칭 함수 (캐싱을 통해 속도 최적화)
+@st.cache_data
+def load_and_process_data():
+    # 1. 정식 사업장 DB 로드
+    db_df = pd.read_csv('DB.csv')
+    db_df['사업장명'] = db_df['사업장명'].str.strip()
+    db_df['소속팀'] = db_df['소속팀'].str.strip()
+    
+    # 매칭 상태를 추적하기 위한 사전 초기화
+    db_sites = {
+        row['사업장명']: {'team': row['소속팀'], 'is_submitted': False}
+        for _, row in db_df.iterrows()
+    }
     official_site_names = list(db_sites.keys())
 
-    # 2. 현장 제출 데이터(오타 포함) 로드 및 퍼지 매칭 처리
-    with open('data.csv', mode='r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # C열인 '사업장명' 데이터 추출 (오타가 있을 수 있음)
-            raw_site_name = row['사업장명'].strip() if row['사업장명'] else ""
-            if not raw_site_name:
-                continue
-            
-            # [퍼지 매칭 실행] 
-            # utils.default_process를 통해 대소문자 통일 및 특수문자 제거 후 비교합니다.
-            match_result = process.extractOne(
-                raw_site_name, 
-                official_site_names, 
-                scorer=fuzz.WRatio,
-                processor=utils.default_process
-            )
-            
-            if match_result:
-                best_match, score, index = match_result
+    # 2. 제출 데이터 로드
+    try:
+        data_df = pd.read_csv('data.csv')
+        # C열이 '사업장명'인지 확인 후 처리
+        if '사업장명' in data_df.columns:
+            for raw_name in data_df['사업장명'].dropna():
+                raw_name = str(raw_name).strip()
+                if not raw_name:
+                    continue
                 
-                # 유사도 점수가 70점 이상인 경우에만 정상 제출로 인정
-                if score >= 70:
-                    db_sites[best_match]['is_submitted'] = True
-                    print(f"[매칭 성공] 입력: '{raw_site_name}' -> 인식: '{best_match}' (유사도: {score:.1f}%)")
-                else:
-                    print(f"[매칭 실패] 입력: '{raw_site_name}' (유사한 정식 명칭을 찾지 못함. 점수: {score:.1f}%)")
+                # 퍼지 매칭 실행 (유사도 70점 기준)
+                match_result = process.extractOne(
+                    raw_name, 
+                    official_site_names, 
+                    scorer=fuzz.WRatio,
+                    processor=utils.default_process
+                )
+                
+                if match_result:
+                    best_match, score, _ = match_result
+                    if score >= 70:
+                        db_sites[best_match]['is_submitted'] = True
+    except Exception as e:
+        st.error(f"data.csv 파일을 읽는 중 오류가 발생했습니다: {e}")
 
-    # 3. 템플릿으로 보낼 최종 데이터 가공 (팀별 통계 및 현장 리스트)
+    # 3. 팀별 데이터 가공
     teams_data = {
         '관리1팀': {'total': 0, 'submitted': 0, 'not_submitted_list': []},
         '관리2팀': {'total': 0, 'submitted': 0, 'not_submitted_list': []},
@@ -67,19 +65,36 @@ def load_data():
             else:
                 teams_data[team]['not_submitted_list'].append(site_name)
 
-    # 팀별 제출률(%) 계산
-    for team, data in teams_data.items():
-        if data['total'] > 0:
-            data['rate'] = int((data['submitted'] / data['total']) * 100)
-        else:
-            data['rate'] = 0
-
     return teams_data
 
-@app.route('/')
-def index():
-    teams_data = load_data()
-    return render_template('index.html', teams_data=teams_data)
+# 데이터 가공 실행
+teams_data = load_and_process_data()
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+# 화면에 4개 컬럼(팀별 카드) 생성
+cols = st.columns(4)
+
+for i, (team_name, data) in enumerate(teams_data.items()):
+    with cols[i]:
+        # 상단 통계 카드 스타일링
+        rate = int((data['submitted'] / data['total'] * 100)) if data['total'] > 0 else 0
+        
+        st.markdown(f"""
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; border: 1px solid #dee2e6; text-align: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; color: #333;">{team_name}</h3>
+            <h1 style="margin: 10px 0; color: #007bff;">{rate}%</h1>
+            <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">(제출 {data['submitted']} / 전체 {data['total']})</p>
+        </div>
+        """, unsafe_allow_data_html=True)
+        
+        # 미실시 현장 드롭다운(Expander) 영역
+        not_sub_count = len(data['not_submitted_list'])
+        with st.expander(f"❌ 미실시 현장 ({not_sub_count}곳)", expanded=True):
+            if not_sub_count == 0:
+                st.write("✅ 모든 현장 제출 완료!")
+            else:
+                for site in data['not_submitted_list']:
+                    st.markdown(f"""
+                    <div style="background-color: #fff5f5; padding: 8px 12px; margin-bottom: 6px; border-left: 4px solid #e03131; border-radius: 4px; font-size: 0.95rem;">
+                        {site}
+                    </div>
+                    """, unsafe_allow_data_html=True)
