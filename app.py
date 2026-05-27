@@ -26,9 +26,27 @@ st.markdown("""
     }
     table { font-size: 14px !important; }
     .stButton>button { border-radius: 8px; width: 100%; }
-    .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid #e2e8f0; }
-    .missing-box { background-color: #fef2f2; border-left: 4px solid #ef4444; }
+    .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid #e2e8f0; text-align: left; }
+    .missing-box { background-color: #fef2f2; border-left: 4px solid #ef4444; color: #0f172a; font-weight: bold; }
     .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
+    
+    /* 미실시 현장 리스트 버튼을 블록 상자처럼 커스텀 스타일링 (image_13d0cb.png 디자인 반영) */
+    div.stButton > button[key^="missing_btn_"] {
+        background-color: #fef2f2 !important;
+        color: #0f172a !important;
+        border: 1px solid #e2e8f0 !important;
+        border-left: 5px solid #ef4444 !important;
+        border-radius: 8px !important;
+        text-align: left !important;
+        padding: 10px 15px !important;
+        font-weight: bold !important;
+        margin-bottom: -5px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+    }
+    div.stButton > button[key^="missing_btn_"]:hover {
+        background-color: #fee2e2 !important;
+        border-color: #fca5a5 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -232,6 +250,7 @@ with st.sidebar:
     st.markdown("### 🔐 관리자 시스템")
     admin_password = st.text_input("관리자 비밀번호 입력", type="password")
     
+    # [루트 1] 사이드바 드롭다운에서 선택하여 저장하는 로직
     if admin_password == "1234":
         st.success("🔑 관리자 권한 확인")
         st.markdown("##### 🛠️ 수동 점검 완료 처리")
@@ -239,7 +258,6 @@ with st.sidebar:
         today_submitted_raw = filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].unique().tolist() if not filtered_df.empty else []
         
         if not db_master.empty:
-            # 미실시 목록 역추적 (이미 처리된 곳 제외)
             missing_sites_for_admin = db_master[
                 (~db_master['표준현장명'].isin(today_submitted_raw)) & 
                 (~db_master['표준현장명'].isin(st.session_state['manual_done_sites']))
@@ -250,19 +268,16 @@ with st.sidebar:
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
                     
-                    # 1. 세션 상태에 반영
                     st.session_state['manual_done_sites'].add(standard_name)
-                    # 2. 로컬 텍스트 파일에 즉시 자동 저장
                     save_manual_sites(st.session_state['manual_done_sites'])
                     
-                    st.toast(f"📢 [{selected_site}] 현장이 수동 완료 처리되었으며 자동 저장되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 실시 완료 처리 및 자동 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
                 
             if st.session_state['manual_done_sites']:
                 if st.button("🔄 수동 변경 내역 전체 초기화 (파일 삭제)"):
-                    # 세션 초기화 및 파일 삭제 조치
                     st.session_state['manual_done_sites'].clear()
                     if os.path.exists(DB_FILE):
                         os.remove(DB_FILE)
@@ -283,7 +298,7 @@ with col_tab1:
         st.session_state.current_tab = "📊 총괄 브리핑"
         st.rerun()
 with col_tab2:
-    if st.button("🏢 전국 사업장 조치대장", use_container_width=True, type="primary" if st.session_state.current_tab == "🏢 전국 사업장 조치대장" else "secondary"):
+    if st.button("🏢 전국 사업장 조치대장", use_container_width=True, type="primary" if st.session_state.current_tab == "🏢 전국 사업장 조 sales자 대장" else "secondary"):
         st.session_state.current_tab = "🏢 전국 사업장 조치대장"
         st.rerun()
 with col_tab3:
@@ -298,22 +313,22 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
+    # 관리자가 완료 처리한 현장을 기존 수동완료 꼬리표 떼고 순수 데이터 피드로 가상 주입
     if st.session_state['manual_done_sites'] and not db_master.empty:
         for m_site in st.session_state['manual_done_sites']:
             if today_df.empty or m_site not in today_df['사업장명'].values:
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
                 new_row['체감온도_수치'] = 25.0 
-                new_row['폭염특보여부'] = "일반(수동완료)"
+                new_row['폭염특보여부'] = "일반" # 수동완료 글자 전면 삭제
                 new_row['참여자'] = "본사 보건관리자"
-                new_row['평상시조치'] = "본사 수동 점검 승인 완료"
+                new_row['평상시조치'] = "본사 점검 승인 완료"
                 today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
 
     if not today_df.empty:
         def get_alert_badge_by_row(row):
             temp = row['체감온도_수치']
             warn = str(row['폭염특보여부'])
-            if '수동완료' in warn: return "🟢 일반 (수동완료)"
             if pd.notna(temp) and temp != "":
                 try:
                     temp = float(temp)
@@ -345,7 +360,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         critical_count = sum(today_df["체감온도_수치"].apply(lambda x: float(x) >= 35.0 if x != "" else False) | today_df["응급조치숙지"].astype(str).apply(lambda x: "아니오" in x or "모르" in x))
         
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", f"수동 완료 {len(st.session_state['manual_done_sites'])}곳 포함")
+        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", f"수동 승인 {len(st.session_state['manual_done_sites'])}곳 포함")
         kpi2.metric("폭염 기상특보 발효", f"{warning_count}개 현장", "기상청 실시간 발효 기준")
         kpi3.metric("집중 보건 관리 요구지", f"{critical_count}개소", "35도 돌파 및 교육 필요처")
         
@@ -435,10 +450,10 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
                 new_row['체감온도_수치'] = 25.0
-                new_row['폭염특보여부'] = "일반 (본사 수동 조치 완료)"
+                new_row['폭염특보여부'] = "일반"
                 new_row['참여자'] = "본사 보건관리자"
-                new_row['평상시조치'] = "본사 수동 이행 상태 확인"
-                new_row['특이사항'] = "관리자 권한으로 수동 점검 완료 처리된 사업장입니다."
+                new_row['평상시조치'] = "본사 이행 상태 확인"
+                new_row['특이사항'] = "현장 점검 완료 처리된 사업장입니다."
                 today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
 
     site_df = today_df.sort_values('체감온도_수치', ascending=False).copy() if not today_df.empty else pd.DataFrame()
@@ -451,7 +466,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
     else:
         for idx, row in site_df.iterrows():
             is_high = float(row["체감온도_수치"]) >= 35.0 if row["체감온도_수치"] != "" else False
-            m_label = "🔵 수동조치완료" if "수동" in str(row['폭염특보여부']) else ("🔥 35도이상 집중관리" if is_high else "🟢 일반보건")
+            m_label = "🟢 일반보건" if is_high == False else "🔥 35도이상 집중관리"
             
             header_title = f"[{m_label}] {row['사업장명']} (체감 {f'{float(row['체감온도_수치']):.1f}' if row['체감온도_수치']!='' else 'N/A'}°C) | 책임관리자: {row['참여자']}"
             is_auto_expand = (st.session_state.expanded_site == row['사업장명'])
@@ -559,20 +574,26 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # [루트 2] 미실시 현장 토글 내부 리스트를 버튼화하여 직접 클릭하면 실시 완료로 변경하는 핵심 변경 영역
                 with st.expander(f"❌ 미실시 현장 ({len(missing)}곳)", expanded=True):
                     if not missing.empty:
-                        for site in missing['현장명'].tolist():
-                            st.markdown(f"<div class='status-box missing-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                        for idx, row_missing in missing.iterrows():
+                            site_raw_name = row_missing['현장명']
+                            std_name = row_missing['표준현장명']
+                            
+                            # 버튼 클릭 시 즉시 셋업 및 자동 저장 처리
+                            if st.button(f"{site_raw_name}", key=f"missing_btn_{std_name}_{idx}"):
+                                st.session_state['manual_done_sites'].add(std_name)
+                                save_manual_sites(st.session_state['manual_done_sites'])
+                                st.toast(f"📢 [{site_raw_name}] 현장이 실시 완료 처리 및 자동 저장되었습니다.", icon="✅")
+                                st.rerun()
                     else:
                         st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
                 
                 with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
                     if not submitted.empty:
                         for site in submitted['현장명'].tolist():
-                            std_name = standardize_site_name(site, valid_db_names_tuple)
-                            if std_name in st.session_state['manual_done_sites']:
-                                st.markdown(f"<div class='status-box done-box' style='border-left: 4px solid #2563eb;'><b>{site} (수동완료)</b></div>", unsafe_allow_html=True)
-                            else:
-                                st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                            # 수동완료 꼬리표 코드를 제거하여 일반 제출처와 동일하게 표기
+                            st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
