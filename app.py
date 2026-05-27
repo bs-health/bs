@@ -27,23 +27,28 @@ st.markdown("""
     table { font-size: 14px !important; }
     .stButton>button { border-radius: 8px; width: 100%; }
     .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid #e2e8f0; text-align: left; }
-    .missing-box { background-color: #fef2f2; border-left: 4px solid #ef4444; color: #0f172a; font-weight: bold; }
+    .missing-box { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; font-weight: normal; }
     .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
     
-    /* 미실시 현장 리스트 버튼을 블록 상자처럼 커스텀 스타일링 (image_13d0cb.png 디자인 반영) */
-    div.stButton > button[key^="missing_btn_"] {
-        background-color: #fef2f2 !important;
+    /* 관리자 인증 시 클릭 가능한 미실시/실시 변경 버튼 스타일 커스텀 (이전 UI 복원) */
+    div.stButton > button[key^="toggle_missing_"], div.stButton > button[key^="toggle_done_"] {
+        background-color: #ffffff !important;
         color: #0f172a !important;
         border: 1px solid #e2e8f0 !important;
-        border-left: 5px solid #ef4444 !important;
         border-radius: 8px !important;
         text-align: left !important;
-        padding: 10px 15px !important;
-        font-weight: bold !important;
-        margin-bottom: -5px !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+        padding: 8px 14px !important;
+        font-weight: normal !important;
+        margin-bottom: -4px !important;
+        width: auto !important;
+        min-width: 150px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
     }
-    div.stButton > button[key^="missing_btn_"]:hover {
+    div.stButton > button[key^="toggle_missing_"]:hover {
+        background-color: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
+    }
+    div.stButton > button[key^="toggle_done_"]:hover {
         background-color: #fee2e2 !important;
         border-color: #fca5a5 !important;
     }
@@ -249,11 +254,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🔐 관리자 시스템")
     admin_password = st.text_input("관리자 비밀번호 입력", type="password")
+    is_admin = (admin_password == "1234")
     
-    # [루트 1] 사이드바 드롭다운에서 선택하여 저장하는 로직
-    if admin_password == "1234":
+    if is_admin:
         st.success("🔑 관리자 권한 확인")
-        st.markdown("##### 🛠️ 수동 점검 완료 처리")
+        st.markdown("##### 🛠️ 사이드바 조작창 (루트 1)")
         
         today_submitted_raw = filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].unique().tolist() if not filtered_df.empty else []
         
@@ -264,14 +269,12 @@ with st.sidebar:
             ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
-                selected_site = st.selectbox("실시로 변경할 현장", missing_sites_for_admin)
+                selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
-                    
                     st.session_state['manual_done_sites'].add(standard_name)
                     save_manual_sites(st.session_state['manual_done_sites'])
-                    
-                    st.toast(f"📢 [{selected_site}] 현장이 실시 완료 처리 및 자동 저장되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 실시 처리 및 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
@@ -298,7 +301,7 @@ with col_tab1:
         st.session_state.current_tab = "📊 총괄 브리핑"
         st.rerun()
 with col_tab2:
-    if st.button("🏢 전국 사업장 조치대장", use_container_width=True, type="primary" if st.session_state.current_tab == "🏢 전국 사업장 조 sales자 대장" else "secondary"):
+    if st.button("🏢 전국 사업장 조치대장", use_container_width=True, type="primary" if st.session_state.current_tab == "🏢 전국 사업장 조치대장" else "secondary"):
         st.session_state.current_tab = "🏢 전국 사업장 조치대장"
         st.rerun()
 with col_tab3:
@@ -313,14 +316,13 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 관리자가 완료 처리한 현장을 기존 수동완료 꼬리표 떼고 순수 데이터 피드로 가상 주입
     if st.session_state['manual_done_sites'] and not db_master.empty:
         for m_site in st.session_state['manual_done_sites']:
             if today_df.empty or m_site not in today_df['사업장명'].values:
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
                 new_row['체감온도_수치'] = 25.0 
-                new_row['폭염특보여부'] = "일반" # 수동완료 글자 전면 삭제
+                new_row['폭염특보여부'] = "일반"
                 new_row['참여자'] = "본사 보건관리자"
                 new_row['평상시조치'] = "본사 점검 승인 완료"
                 today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
@@ -574,26 +576,43 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # [루트 2] 미실시 현장 토글 내부 리스트를 버튼화하여 직접 클릭하면 실시 완료로 변경하는 핵심 변경 영역
+                # ❌ 미실시 현장 관리 영역 (이전 버전 복원 및 보안 잠금 적용)
                 with st.expander(f"❌ 미실시 현장 ({len(missing)}곳)", expanded=True):
                     if not missing.empty:
                         for idx, row_missing in missing.iterrows():
                             site_raw_name = row_missing['현장명']
                             std_name = row_missing['표준현장명']
                             
-                            # 버튼 클릭 시 즉시 셋업 및 자동 저장 처리
-                            if st.button(f"{site_raw_name}", key=f"missing_btn_{std_name}_{idx}"):
-                                st.session_state['manual_done_sites'].add(std_name)
-                                save_manual_sites(st.session_state['manual_done_sites'])
-                                st.toast(f"📢 [{site_raw_name}] 현장이 실시 완료 처리 및 자동 저장되었습니다.", icon="✅")
-                                st.rerun()
+                            if is_admin:
+                                # 관리자 세션: 이전 UI 스타일을 반영한 버튼 형태 활성화 (클릭 시 실시 완료로 전환 후 파일 자동저장)
+                                if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
+                                    st.session_state['manual_done_sites'].add(std_name)
+                                    save_manual_sites(st.session_state['manual_done_sites'])
+                                    st.toast(f"📢 [{site_raw_name}] 현장이 실시 상태로 변경되었습니다.", icon="✅")
+                                    st.rerun()
+                            else:
+                                # 일반 사용자 세션: 이전 버전과 완벽하게 동일한 단순 화이트 박스 형태 유지
+                                st.markdown(f"<div class='status-box missing-box'>{site_raw_name}</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
                 
+                # ✅ 실시 완료 현장 관리 영역 (쌍방향 스위칭 적용)
                 with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
                     if not submitted.empty:
-                        for site in submitted['현장명'].tolist():
-                            # 수동완료 꼬리표 코드를 제거하여 일반 제출처와 동일하게 표기
-                            st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                        for idx, row_submitted in submitted.iterrows():
+                            site_raw_name = row_submitted['현장명']
+                            std_name = row_submitted['표준현장명']
+                            
+                            # 수동 조치로 추가된 건인 경우에 한하여 실시 -> 미실시 토글 가능하도록 연동
+                            if is_admin and (std_name in st.session_state['manual_done_sites']):
+                                # 관리자 세션: 클릭 시 수동완료 목록에서 제외하여 미실시 상태로 복원 후 자동저장
+                                if st.button(f"↩️ {site_raw_name}", key=f"toggle_done_{std_name}_{idx}"):
+                                    st.session_state['manual_done_sites'].discard(std_name)
+                                    save_manual_sites(st.session_state['manual_done_sites'])
+                                    st.toast(f"📢 [{site_raw_name}] 현장이 다시 미실시 상태로 되돌아갔습니다.", icon="🔄")
+                                    st.rerun()
+                            else:
+                                # 일반 사용자 및 실제 데이터 제출 현장: 순수 완료 상태 유지 (수동완료 표시 제거)
+                                st.markdown(f"<div class='status-box done-box'><b>{site_raw_name}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
