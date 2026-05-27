@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
+import os  # 파일 저장 및 확인을 위해 추가
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
@@ -31,9 +32,25 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 세션 상태 초기화 (수동 완결 처리된 현장 저장용 리스트 및 검색/탭 정보)
+# 💾 파일 입출력 헬퍼 함수 (영구 저장용)
+DB_FILE = "manual_done_sites.txt"
+
+def load_manual_sites():
+    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다."""
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return set([line.strip() for line in f.readlines() if line.strip()])
+    return set()
+
+def save_manual_sites(sites_set):
+    """수동 완료 처리된 현장 목록을 파일에 저장합니다."""
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        for site in sites_set:
+            f.write(f"{site}\n")
+
+# 세션 상태 초기화 (최초 로드 시 파일에서 데이터를 읽어옴)
 if 'manual_done_sites' not in st.session_state:
-    st.session_state['manual_done_sites'] = set()
+    st.session_state['manual_done_sites'] = load_manual_sites()
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "📊 총괄 브리핑"
 if 'search_query' not in st.session_state:
@@ -210,21 +227,19 @@ with st.sidebar:
         today_kst = current_today
         filtered_df = pd.DataFrame()
 
-    # 🔐 관리자 인증 시스템 추가
+    # 🔐 관리자 인증 시스템
     st.markdown("---")
     st.markdown("### 🔐 관리자 시스템")
     admin_password = st.text_input("관리자 비밀번호 입력", type="password")
     
-    # 요청하신 비밀번호 '1234' 조건 매칭
     if admin_password == "1234":
         st.success("🔑 관리자 권한 확인")
         st.markdown("##### 🛠️ 수동 점검 완료 처리")
         
-        # 실제 당일 제출 데이터 가공 확인
         today_submitted_raw = filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].unique().tolist() if not filtered_df.empty else []
         
-        # 마스터 DB 기준 미실시 목록 역추적 (이미 수동 완료 처리된 곳도 제외)
         if not db_master.empty:
+            # 미실시 목록 역추적 (이미 처리된 곳 제외)
             missing_sites_for_admin = db_master[
                 (~db_master['표준현장명'].isin(today_submitted_raw)) & 
                 (~db_master['표준현장명'].isin(st.session_state['manual_done_sites']))
@@ -232,19 +247,26 @@ with st.sidebar:
             
             if missing_sites_for_admin:
                 selected_site = st.selectbox("실시로 변경할 현장", missing_sites_for_admin)
-                if st.button("선택 현장 '실시'로 강제 전환"):
-                    # 표준 명칭으로 변환하여 세션 상태에 저장
+                if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
+                    
+                    # 1. 세션 상태에 반영
                     st.session_state['manual_done_sites'].add(standard_name)
-                    st.toast(f"📢 [{selected_site}] 현장이 수동 완료 처리되었습니다.", icon="✅")
+                    # 2. 로컬 텍스트 파일에 즉시 자동 저장
+                    save_manual_sites(st.session_state['manual_done_sites'])
+                    
+                    st.toast(f"📢 [{selected_site}] 현장이 수동 완료 처리되었으며 자동 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
                 
             if st.session_state['manual_done_sites']:
-                if st.button("🔄 수동 변경 내역 전체 초기화"):
+                if st.button("🔄 수동 변경 내역 전체 초기화 (파일 삭제)"):
+                    # 세션 초기화 및 파일 삭제 조치
                     st.session_state['manual_done_sites'].clear()
-                    st.toast("모든 수동 조치 내역이 리셋되었습니다.")
+                    if os.path.exists(DB_FILE):
+                        os.remove(DB_FILE)
+                    st.toast("모든 수동 조치 내역이 초기화되었습니다.")
                     st.rerun()
     elif admin_password:
         st.error("❌ 비밀번호가 틀렸습니다.")
@@ -276,14 +298,12 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 💡 수동 점검 처리된 가상 행 생성 로직 (총괄 화면 카운트 일치를 위함)
     if st.session_state['manual_done_sites'] and not db_master.empty:
         for m_site in st.session_state['manual_done_sites']:
             if today_df.empty or m_site not in today_df['사업장명'].values:
-                # 데이터가 아예 없는 곳에 수동 처리 시 가상 행 대입
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
-                new_row['체감온도_수치'] = 25.0 # 일반 기온 기본값 위임
+                new_row['체감온도_수치'] = 25.0 
                 new_row['폭염특보여부'] = "일반(수동완료)"
                 new_row['참여자'] = "본사 보건관리자"
                 new_row['평상시조치'] = "본사 수동 점검 승인 완료"
@@ -409,7 +429,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
 
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 조치대장에도 가상 수동 정보 노출 적용
     if st.session_state['manual_done_sites'] and not db_master.empty:
         for m_site in st.session_state['manual_done_sites']:
             if today_df.empty or m_site not in today_df['사업장명'].values:
@@ -491,7 +510,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                         </div>
                     """, unsafe_allow_html=True)
                 
-                # 가상 수동 변경 열의 경우 차트 예외 처리
                 if row['참여자'] != "본사 보건관리자":
                     st.markdown("#### 📈 체감온도 누적 변화 추이")
                     history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
@@ -514,7 +532,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
         
-        # 💡 수동으로 제출 처리한 사이트 목록을 제출완료 리스트에 합산 반영
         if st.session_state['manual_done_sites']:
             submitted_sites = list(set(submitted_sites + list(st.session_state['manual_done_sites'])))
 
@@ -553,7 +570,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                     if not submitted.empty:
                         for site in submitted['현장명'].tolist():
                             std_name = standardize_site_name(site, valid_db_names_tuple)
-                            # 관리자 권한 수동 조치 대상 식별 꼬리표 부여
                             if std_name in st.session_state['manual_done_sites']:
                                 st.markdown(f"<div class='status-box done-box' style='border-left: 4px solid #2563eb;'><b>{site} (수동완료)</b></div>", unsafe_allow_html=True)
                             else:
