@@ -54,7 +54,7 @@ def get_valid_db_names():
 
 def standardize_site_name_base(name):
     """(1단계 정제) 공백, 자음/모음 오타 제거 및 기본 매핑을 수행합니다."""
-    # 💡 [핵심] 정규식을 통해 모든 공백 및 단독 자음/모음(ㄴ, ㅇㅇ, ㅋㅋ 등) 완벽 제거 ('센ㄴ터' -> '센터')
+    # 공백 및 단독 자음/모음(ㄴ, ㅇㅇ, ㅋㅋ 등) 완벽 제거 ('센ㄴ터' -> '센터')
     name = re.sub(r'[ㄱ-ㅎㅏ-ㅣ\s]', '', str(name))
     
     # 하드코딩 예외 우선 처리
@@ -66,24 +66,21 @@ def standardize_site_name_base(name):
         '가든5툴': '가든파이브툴',               
         '가든5툴백상코퍼레이션': '가든파이브툴',
         '가든파이툴': '가든파이브툴',             
-        '쿠팡경산1,2센터': '쿠팡경산1,2FC',
-        '쿠팡경산1,2': '쿠팡경산1,2FC'
+        '쿠팡경산1,2FC': '쿠팡경산1,2센터',
+        '쿠팡경산1,2': '쿠팡경산1,2센터'
     }
     name = early_mapping.get(name, name)
     
     # 이미 목표 이름으로 변환되었다면 후속 로직 생략
-    if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2FC']:
+    if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2센터']:
         return name
 
-    # 불필요한 접미사 제거 및 오타 교정
-    name = name.replace('빌딩', '').replace('타워', '').replace('현장', '').replace('지점', '')
+    # 💡 [요청 반영] 빌딩, 타워 생략 방지 ('현장', '지점'만 제거하도록 수정)
+    name = name.replace('현장', '').replace('지점', '')
     name = name.replace('샌타', '센터')
     
-    # '센터' 명칭을 그대로 유지해야 하는 예외 사업장 목록
-    exclusions = ["경주드림", "월미도물류", "인천국제", "사사", "인천택배", "페덱스", "성수", "가평", "경산", "인큐베이팅"]
-    
-    if not any(ext in name for ext in exclusions):
-        name = name.replace('센터', 'FC')
+    # 대소문자 구분 없이 모든 'FC'를 '센터'로 일괄 변환
+    name = re.sub(r'(?i)fc', '센터', name)
         
     name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
     return name_mapping.get(name, name)
@@ -93,8 +90,7 @@ def standardize_site_name(name, valid_db_names):
     """(2단계 정제) 1단계 정제된 이름을 바탕으로 DB 기준 이름 포함 여부를 확인하여 최종 통일합니다."""
     name = standardize_site_name_base(name)
     
-    # 💡 [핵심] DB 마스터 이름 포함 여부 확인 (스마트 매칭)
-    # 가장 긴 DB 이름부터 비교하여 ("LG에너지솔루션과천R&D캠퍼스"에서 "에너지솔루션과천" 발견 시 즉시 교체)
+    # DB 마스터 이름 포함 여부 확인 (스마트 매칭)
     if valid_db_names:
         for db_name in sorted(valid_db_names, key=len, reverse=True):
             if db_name in name:
