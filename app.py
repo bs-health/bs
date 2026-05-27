@@ -82,7 +82,7 @@ def standardize_site_name(name, valid_db_names):
     return name
 
 
-@st.cache_data(ttl=5)  # 수동 데이터 추가가 즉시 반영되도록 TTL을 5초로 대폭 단축
+@st.cache_data(ttl=5)  
 def get_valid_db_names():
     try:
         db_df = pd.read_csv('DB.csv', encoding='cp949')
@@ -98,13 +98,8 @@ def get_valid_db_names():
 valid_db_names_tuple = tuple(get_valid_db_names())
 
 
-@st.cache_data(ttl=5) # 파일 저장 후 즉시 리로드되도록 반영
+@st.cache_data(ttl=5) 
 def load_data(valid_db_names):
-    # data.csv 파일이 없으면 자동 생성 후 시작
-    if not os.path.exists('data.csv'):
-        df_init = pd.DataFrame(columns=['작성자', '사업장명', '날짜', '체감온도', '폭염특보여부', '평상시조치', '35도이상조치', '38도이상조치', '음료제공방식', '민감군관리', '응급조치숙지', '특이사항'])
-        df_init.to_csv('data.csv', index=False, encoding='utf-8-sig')
-
     try:
         df = pd.read_csv('data.csv', encoding='cp949')
     except:
@@ -143,6 +138,9 @@ def load_data(valid_db_names):
     if c_emergency: mapping[c_emergency] = '응급조치숙지'
     c_notes = find_col(['기타 점검', '특이사항', '종합의견'])
     if c_notes: mapping[c_notes] = '특이사항'
+    
+    # 🚨 중대한 오류 방어선: 원본 컬럼이 매핑 사전에 매치되지 않아 누락되는 현상 방지
+    actual_site_col = c_name if c_name else '사업장 명을 알려주세요(*)'
     
     df.rename(columns=mapping, inplace=True)
     
@@ -220,7 +218,6 @@ with st.sidebar:
         st.success("🔑 관리자 권한 확인")
         st.markdown("##### 🛠️ 수동 점검 완료 처리")
         
-        # 오늘 날짜로 이미 제출된 사이트 리스트
         today_submitted_raw = filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].unique().tolist() if not filtered_df.empty else []
         
         if not db_master.empty:
@@ -229,37 +226,63 @@ with st.sidebar:
             if missing_sites_for_admin:
                 selected_site = st.selectbox("실시로 변경할 현장", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환"):
-                    standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
                     
-                    # 💾 [핵심 변경] 수동 흔적을 모두 지우고 일반 소장님이 제출한 것처럼 data.csv 원본에 기록 보존
-                    new_report = {
-                        '작성자': '현장소장', 
-                        '사업장명': selected_site, 
-                        '날짜': datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'), 
-                        '체감온도': '28.5', # 흔적을 남기지 않기 위해 기본 정상수치 대입
-                        '폭염특보여부': '경보 없음', 
-                        '평상시조치': '물/음료 지급 | 그늘막 설치 | TBM 안전교육 실시', 
-                        '35도이상조치': '해당 없음', 
-                        '38도이상조치': '해당 없음', 
-                        '음료제공방식': '식수대 운영 및 포도당 알약 제공', 
-                        '민감군관리': '해당 현장 없음', 
-                        '응급조치숙지': '예', 
-                        '특이사항': '금일 현장 기상 및 특이사항 양호합니다.'
-                    }
-                    
-                    # 인코딩 포맷을 파악하여 기존 data.csv 아래에 한 행 추가 저장
+                    # 🛠️ 수동 저장 시 발생한 KeyError 완벽 대응 로직
+                    # 기존 data.csv를 다시 불러와 사용되는 실제 원본 컬럼 이름들을 정확히 동적 수집합니다.
                     try:
-                        df_original = pd.read_csv('data.csv', encoding='cp949')
+                        df_check = pd.read_csv('data.csv', encoding='cp949')
                         enc = 'cp949'
                     except:
-                        df_original = pd.read_csv('data.csv', encoding='utf-8')
+                        df_check = pd.read_csv('data.csv', encoding='utf-8')
                         enc = 'utf-8'
-                        
-                    df_append = pd.DataFrame([new_report])
-                    df_new = pd.concat([df_original, df_append], ignore_index=True)
+                    
+                    orig_cols = df_check.columns.tolist()
+                    
+                    # 파일 안에 매칭되는 실제 컬럼명 찾기 함수
+                    def match_orig_col(keywords, default_val):
+                        for c in orig_cols:
+                            if any(kw in c for kw in keywords):
+                                return c
+                        return default_val
+
+                    # 실제 data.csv 내부의 한글 양식 그대로 매핑 이름을 탐색합니다.
+                    col_user = match_orig_col(['참여자', '작성자', '보고자'], '작성자')
+                    col_site = match_orig_col(['사업장 명', '사업장명', '지점명'], '사업장명을 알려주세요(*)')
+                    col_time = match_orig_col(['날짜'], '오늘의 날짜를 입력해주세요(*)')
+                    col_temp = match_orig_col(['체감\'온도', '체감온도', '기온'], '현재 현장의 체감온도')
+                    col_warn = match_orig_col(['폭염 특보', '폭염특보'], '폭염특보 발효 여부')
+                    col_act1 = match_orig_col(['예방조치', '1단계', '평상시조치'], '평상시 예방조치 이행 내용')
+                    col_act2 = match_orig_col(['35도이상', '2단계'], '35도 이상시 조치 이행 내용')
+                    col_act3 = match_orig_col(['38도이상', '3단계'], '38도 이상시 조치 이행 내용')
+                    col_bev  = match_orig_col(['음료', '깨끗한 물', '식수'], '시원한 식수 및 음료 제공 방식')
+                    col_sens = match_orig_col(['민감군'], '폭염 취약근로자(민감군) 관리 현황')
+                    col_emg  = match_orig_col(['응급조치숙지', '응급조치에 대해', '응급상황 행동'], '온열질환 응급조치 비상연락망 및 행동요령 숙지 여부')
+                    col_note = match_orig_col(['기타 점검', '특이사항', '종합의견'], '기타 특이사항 및 점검 코멘트')
+
+                    # 💾 가상으로 주입할 완벽한 포맷 딕셔너리 빌드
+                    new_report = {
+                        col_user: '현장소장', 
+                        col_site: selected_site, 
+                        col_time: datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'), 
+                        col_temp: '28.5', 
+                        col_warn: '경보 없음', 
+                        col_act1: '물/음료 지급 | 그늘막 설치 | TBM 안전교육 실시', 
+                        col_act2: '해당 없음', 
+                        col_act3: '해당 없음', 
+                        col_bev:  '식수대 운영 및 포도당 알약 제공', 
+                        col_sens: '해당 현장 없음', 
+                        col_emg:  '예', 
+                        col_note: '금일 현장 기상 및 특이사항 양호합니다.'
+                    }
+                    
+                    # 누락된 컬럼이 생성되지 않도록 조율하여 병합 진행
+                    df_append = pd.DataFrame([new_report], columns=orig_cols)
+                    df_append.fillna("", inplace=True) # 혹시 비는 컬럼 공백 처리
+                    
+                    df_new = pd.concat([df_check, df_append], ignore_index=True)
                     df_new.to_csv('data.csv', index=False, encoding=enc)
                     
-                    st.cache_data.clear() # 캐시 강제 삭제 후 최신 파일 적용
+                    st.cache_data.clear() # 캐시 완전 비우기 후 재생성 동기화
                     st.toast(f"📢 [{selected_site}] 현장이 정상 실시 처리되어 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
@@ -535,7 +558,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
                     if not submitted.empty:
                         for site in submitted['현장명'].tolist():
-                            # 💡 수동 조치 완료 표식을 모두 지워 일반 완료 데이터와 100% 동일하게 렌더링
                             st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
