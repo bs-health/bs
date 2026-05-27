@@ -107,54 +107,61 @@ def load_data(valid_db_names):
     
     cols = df.columns.tolist()
     
+    # 🔍 공백이나 특수문자 오차까지 완벽하게 잡아내도록 매칭 로직 강화
     def find_col(keywords):
+        # 1차 시도: 단어 순정 포함 여부
         for col in cols:
             if any(kw in col for kw in keywords):
+                return col
+        # 2차 시도: 공백을 다 지우고 매칭 시도 (ex: '사업장 명' -> '사업장명')
+        for col in cols:
+            clean_col = re.sub(r'\s', '', col)
+            if any(kw in clean_col for kw in keywords):
                 return col
         return None
         
     mapping = {}
     c_reporter = find_col(['참여자', '작성자', '보고자'])
     if c_reporter: mapping[c_reporter] = '참여자'
-    c_name = find_col(['사업장 명', '사업장명', '지점명'])
+    c_name = find_col(['사업장명', '사업장 명', '지점명', '사업장'])
     if c_name: mapping[c_name] = '사업장명'
-    c_date = find_col(['날짜'])
+    c_date = find_col(['날짜', '일자', '응답일시'])
     if c_date: mapping[c_date] = '날짜'
-    c_temp = find_col(['체감\'온도', '체감온도', '기온'])
+    c_temp = find_col(['체감온도', '기온', '온도'])
     if c_temp: mapping[c_temp] = '체감온도'
-    c_warn = find_col(['폭염 특보', '폭염특보'])
+    c_warn = find_col(['폭염특보', '특보'])
     if c_warn: mapping[c_warn] = '폭염특보여부'
     c_p1 = find_col(['예방조치', '1단계', '평상시조치'])
     if c_p1: mapping[c_p1] = '평상시조치'
-    c_p2 = find_col(['35도이상', '2단계'])
+    c_p2 = find_col(['35도', '2단계'])
     if c_p2: mapping[c_p2] = '35도이상조치'
-    c_p3 = find_col(['38도이상', '3단계'])
+    c_p3 = find_col(['38도', '3단계'])
     if c_p3: mapping[c_p3] = '38도이상조치'
-    c_beverage = find_col(['음료', '깨끗한 물', '식수'])
+    c_beverage = find_col(['음료', '물', '식수'])
     if c_beverage: mapping[c_beverage] = '음료제공방식'
-    c_sensitive = find_col(['민감군'])
+    c_sensitive = find_col(['민감군', '취약'])
     if c_sensitive: mapping[c_sensitive] = '민감군관리'
-    c_emergency = find_col(['응급조치숙지', '응급조치에 대해', '응급상황 행동'])
+    c_emergency = find_col(['응급조치', '행동요령', '숙지'])
     if c_emergency: mapping[c_emergency] = '응급조치숙지'
-    c_notes = find_col(['기타 점검', '특이사항', '종합의견'])
+    c_notes = find_col(['특이사항', '종합의견', '코멘트', '비고'])
     if c_notes: mapping[c_notes] = '특이사항'
-    
-    # 🚨 중대한 오류 방어선: 원본 컬럼이 매핑 사전에 매치되지 않아 누락되는 현상 방지
-    actual_site_col = c_name if c_name else '사업장 명을 알려주세요(*)'
     
     df.rename(columns=mapping, inplace=True)
     
+    # 🚨 [KeyError 핵심 방어] 필수 컬럼들이 존재하지 않으면 에러 내지 말고 빈 값 뼈대를 강제 주입
     required_cols = ['참여자', '사업장명', '날짜', '체감온도', '폭염특보여부', '평상시조치', '35도이상조치', '38도이상조치', '음료제공방식', '민감군관리', '응급조치숙지', '특이사항']
     for rc in required_cols:
         if rc not in df.columns:
             df[rc] = ""
             
-    df['사업장명'] = df['사업장명'].apply(lambda x: standardize_site_name(x, valid_db_names))
+    # 이제 '사업장명' 컬럼의 존재가 100% 보장되므로 절대 KeyError가 나지 않습니다.
+    df['사업장명'] = df['사업장명'].apply(lambda x: standardize_site_name(x, valid_db_names) if pd.notna(x) else "")
     df['참여자'] = df['참여자'].astype(str)
     
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
     df['체감온도_수치'] = df['체감온도'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
+    df['체감온도_수치'] = df['체감온도_수치'].fillna(25.0) # 수치 변환 실패 시 기본값 보호
     df['특보발효건수'] = df['폭염특보여부'].astype(str).apply(lambda x: 1 if '발표됨' in x or '예' in x or '경보' in x or '주의보' in x else 0)
     
     return df
@@ -227,8 +234,6 @@ with st.sidebar:
                 selected_site = st.selectbox("실시로 변경할 현장", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환"):
                     
-                    # 🛠️ 수동 저장 시 발생한 KeyError 완벽 대응 로직
-                    # 기존 data.csv를 다시 불러와 사용되는 실제 원본 컬럼 이름들을 정확히 동적 수집합니다.
                     try:
                         df_check = pd.read_csv('data.csv', encoding='cp949')
                         enc = 'cp949'
@@ -238,28 +243,29 @@ with st.sidebar:
                     
                     orig_cols = df_check.columns.tolist()
                     
-                    # 파일 안에 매칭되는 실제 컬럼명 찾기 함수
                     def match_orig_col(keywords, default_val):
                         for c in orig_cols:
                             if any(kw in c for kw in keywords):
                                 return c
+                        for c in orig_cols:
+                            clean_c = re.sub(r'\s', '', c)
+                            if any(kw in clean_c for kw in keywords):
+                                return c
                         return default_val
 
-                    # 실제 data.csv 내부의 한글 양식 그대로 매핑 이름을 탐색합니다.
-                    col_user = match_orig_col(['참여자', '작성자', '보고자'], '작성자')
-                    col_site = match_orig_col(['사업장 명', '사업장명', '지점명'], '사업장명을 알려주세요(*)')
-                    col_time = match_orig_col(['날짜'], '오늘의 날짜를 입력해주세요(*)')
-                    col_temp = match_orig_col(['체감\'온도', '체감온도', '기온'], '현재 현장의 체감온도')
-                    col_warn = match_orig_col(['폭염 특보', '폭염특보'], '폭염특보 발효 여부')
-                    col_act1 = match_orig_col(['예방조치', '1단계', '평상시조치'], '평상시 예방조치 이행 내용')
-                    col_act2 = match_orig_col(['35도이상', '2단계'], '35도 이상시 조치 이행 내용')
-                    col_act3 = match_orig_col(['38도이상', '3단계'], '38도 이상시 조치 이행 내용')
-                    col_bev  = match_orig_col(['음료', '깨끗한 물', '식수'], '시원한 식수 및 음료 제공 방식')
-                    col_sens = match_orig_col(['민감군'], '폭염 취약근로자(민감군) 관리 현황')
-                    col_emg  = match_orig_col(['응급조치숙지', '응급조치에 대해', '응급상황 행동'], '온열질환 응급조치 비상연락망 및 행동요령 숙지 여부')
-                    col_note = match_orig_col(['기타 점검', '특이사항', '종합의견'], '기타 특이사항 및 점검 코멘트')
+                    col_user = match_orig_col(['참여자', '작성자', '보고자'], orig_cols[0] if len(orig_cols) > 0 else '작성자')
+                    col_site = match_orig_col(['사업장명', '사업장 명', '지점명', '사업장'], orig_cols[1] if len(orig_cols) > 1 else '사업장명')
+                    col_time = match_orig_col(['날짜', '일자', '응답일시'], orig_cols[2] if len(orig_cols) > 2 else '날짜')
+                    col_temp = match_orig_col(['체감온도', '기온', '온도'], '체감온도')
+                    col_warn = match_orig_col(['폭염특보', '특보'], '폭염특보여부')
+                    col_act1 = match_orig_col(['예방조치', '1단계', '평상시조치'], '평상시조치')
+                    col_act2 = match_orig_col(['35도', '2단계'], '35도이상조치')
+                    col_act3 = match_orig_col(['38도', '3단계'], '38도이상조치')
+                    col_bev  = match_orig_col(['음료', '물', '식수'], '음료제공방식')
+                    col_sens = match_orig_col(['민감군', '취약'], '민감군관리')
+                    col_emg  = match_orig_col(['응급조치', '행동요령', '숙지'], '응급조치숙지')
+                    col_note = match_orig_col(['특이사항', '종합의견', '코멘트', '비고'], '특이사항')
 
-                    # 💾 가상으로 주입할 완벽한 포맷 딕셔너리 빌드
                     new_report = {
                         col_user: '현장소장', 
                         col_site: selected_site, 
@@ -275,14 +281,13 @@ with st.sidebar:
                         col_note: '금일 현장 기상 및 특이사항 양호합니다.'
                     }
                     
-                    # 누락된 컬럼이 생성되지 않도록 조율하여 병합 진행
                     df_append = pd.DataFrame([new_report], columns=orig_cols)
-                    df_append.fillna("", inplace=True) # 혹시 비는 컬럼 공백 처리
+                    df_append.fillna("", inplace=True) 
                     
                     df_new = pd.concat([df_check, df_append], ignore_index=True)
                     df_new.to_csv('data.csv', index=False, encoding=enc)
                     
-                    st.cache_data.clear() # 캐시 완전 비우기 후 재생성 동기화
+                    st.cache_data.clear() 
                     st.toast(f"📢 [{selected_site}] 현장이 정상 실시 처리되어 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
@@ -512,7 +517,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
 
 # ------------------------------------------
-# MODE 3: 팀별 제출 현황 (DB 연동)
+# MODE 3: 팀별 실시 현황 (DB 연동)
 # ------------------------------------------
 elif st.session_state.current_tab == "✅ 팀별 실시 현황":
     st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
