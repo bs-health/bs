@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
-import os
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
@@ -32,7 +31,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 세션 상태 초기화
+# 세션 상태 초기화 (수동 완결 처리된 현장 저장용 리스트 및 검색/탭 정보)
+if 'manual_done_sites' not in st.session_state:
+    st.session_state['manual_done_sites'] = set()
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "📊 총괄 브리핑"
 if 'search_query' not in st.session_state:
@@ -43,6 +44,22 @@ if 'expanded_site' not in st.session_state:
 # ==========================================
 # 2. 강력한 데이터 정제 및 유연한 컬럼 매핑 엔진 
 # ==========================================
+
+@st.cache_data(ttl=60)
+def get_valid_db_names():
+    """DB.csv에서 기준이 되는 현장명 리스트를 먼저 학습하여 추출합니다."""
+    try:
+        db_df = pd.read_csv('DB.csv', encoding='cp949')
+    except:
+        try:
+            db_df = pd.read_csv('DB.csv', encoding='utf-8')
+        except:
+            return []
+            
+    if '현장명' in db_df.columns:
+        return db_df['현장명'].dropna().apply(standardize_site_name_base).unique().tolist()
+    return []
+
 
 def standardize_site_name_base(name):
     """(1단계 정제) 공백, 자음/모음 오타 제거 및 기본 매핑을 수행합니다."""
@@ -79,26 +96,13 @@ def standardize_site_name(name, valid_db_names):
         for db_name in sorted(valid_db_names, key=len, reverse=True):
             if db_name in name:
                 return db_name
+                
     return name
 
 
-@st.cache_data(ttl=5)  
-def get_valid_db_names():
-    try:
-        db_df = pd.read_csv('DB.csv', encoding='cp949')
-    except:
-        try:
-            db_df = pd.read_csv('DB.csv', encoding='utf-8')
-        except:
-            return []
-    if '현장명' in db_df.columns:
-        return db_df['현장명'].dropna().apply(standardize_site_name_base).unique().tolist()
-    return []
-
 valid_db_names_tuple = tuple(get_valid_db_names())
 
-
-@st.cache_data(ttl=5) 
+@st.cache_data(ttl=60)
 def load_data(valid_db_names):
     try:
         df = pd.read_csv('data.csv', encoding='cp949')
@@ -107,66 +111,56 @@ def load_data(valid_db_names):
     
     cols = df.columns.tolist()
     
-    # 🔍 공백이나 특수문자 오차까지 완벽하게 잡아내도록 매칭 로직 강화
     def find_col(keywords):
-        # 1차 시도: 단어 순정 포함 여부
         for col in cols:
             if any(kw in col for kw in keywords):
-                return col
-        # 2차 시도: 공백을 다 지우고 매칭 시도 (ex: '사업장 명' -> '사업장명')
-        for col in cols:
-            clean_col = re.sub(r'\s', '', col)
-            if any(kw in clean_col for kw in keywords):
                 return col
         return None
         
     mapping = {}
-    c_reporter = find_col(['참여자', '작성자', '보고자'])
+    c_reporter = find_col(['참여자', '작성자'])
     if c_reporter: mapping[c_reporter] = '참여자'
-    c_name = find_col(['사업장명', '사업장 명', '지점명', '사업장'])
+    c_name = find_col(['사업장 명', '사업장명', '지점명'])
     if c_name: mapping[c_name] = '사업장명'
-    c_date = find_col(['날짜', '일자', '응답일시'])
+    c_date = find_col(['날짜'])
     if c_date: mapping[c_date] = '날짜'
-    c_temp = find_col(['체감온도', '기온', '온도'])
+    c_temp = find_col(['체감\'온도', '체감온도', '기온'])
     if c_temp: mapping[c_temp] = '체감온도'
-    c_warn = find_col(['폭염특보', '특보'])
+    c_warn = find_col(['폭염 특보', '폭염특보'])
     if c_warn: mapping[c_warn] = '폭염특보여부'
     c_p1 = find_col(['예방조치', '1단계', '평상시조치'])
     if c_p1: mapping[c_p1] = '평상시조치'
-    c_p2 = find_col(['35도', '2단계'])
+    c_p2 = find_col(['35도이상', '2단계'])
     if c_p2: mapping[c_p2] = '35도이상조치'
-    c_p3 = find_col(['38도', '3단계'])
+    c_p3 = find_col(['38도이상', '3단계'])
     if c_p3: mapping[c_p3] = '38도이상조치'
-    c_beverage = find_col(['음료', '물', '식수'])
+    c_beverage = find_col(['음료', '깨끗한 물', '식수'])
     if c_beverage: mapping[c_beverage] = '음료제공방식'
-    c_sensitive = find_col(['민감군', '취약'])
+    c_sensitive = find_col(['민감군'])
     if c_sensitive: mapping[c_sensitive] = '민감군관리'
-    c_emergency = find_col(['응급조치', '행동요령', '숙지'])
+    c_emergency = find_col(['응급조치숙지', '응급조치에 대해', '응급상황 행동'])
     if c_emergency: mapping[c_emergency] = '응급조치숙지'
-    c_notes = find_col(['특이사항', '종합의견', '코멘트', '비고'])
+    c_notes = find_col(['기타 점검', '특이사항', '종합의견'])
     if c_notes: mapping[c_notes] = '특이사항'
     
     df.rename(columns=mapping, inplace=True)
     
-    # 🚨 [KeyError 핵심 방어] 필수 컬럼들이 존재하지 않으면 에러 내지 말고 빈 값 뼈대를 강제 주입
     required_cols = ['참여자', '사업장명', '날짜', '체감온도', '폭염특보여부', '평상시조치', '35도이상조치', '38도이상조치', '음료제공방식', '민감군관리', '응급조치숙지', '특이사항']
     for rc in required_cols:
         if rc not in df.columns:
             df[rc] = ""
             
-    # 이제 '사업장명' 컬럼의 존재가 100% 보장되므로 절대 KeyError가 나지 않습니다.
-    df['사업장명'] = df['사업장명'].apply(lambda x: standardize_site_name(x, valid_db_names) if pd.notna(x) else "")
+    df['사업장명'] = df['사업장명'].apply(lambda x: standardize_site_name(x, valid_db_names))
     df['참여자'] = df['참여자'].astype(str)
     
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
     df['체감온도_수치'] = df['체감온도'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
-    df['체감온도_수치'] = df['체감온도_수치'].fillna(25.0) # 수치 변환 실패 시 기본값 보호
     df['특보발효건수'] = df['폭염특보여부'].astype(str).apply(lambda x: 1 if '발표됨' in x or '예' in x or '경보' in x or '주의보' in x else 0)
     
     return df
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=60)
 def load_db_data(valid_db_names):
     try:
         db_df = pd.read_csv('DB.csv', encoding='cp949')
@@ -191,7 +185,7 @@ raw_df = raw_df.drop_duplicates(subset=['비교용_날짜', '사업장명'], kee
 db_master = load_db_data(valid_db_names_tuple)
 
 # ==========================================
-# 3. 사이드바 구성 및 관리자 저장 기능 
+# 3. 사이드바 구성 및 관리자 인증/기능 구현
 # ==========================================
 with st.sidebar:
     st.markdown("<div style='font-size: 80px; margin-bottom: -20px;'>🌡️</div>", unsafe_allow_html=True)
@@ -216,82 +210,42 @@ with st.sidebar:
         today_kst = current_today
         filtered_df = pd.DataFrame()
 
-    # 🔐 관리자 인증 및 CSV 직접 저장 시스템
+    # 🔐 관리자 인증 시스템 추가
     st.markdown("---")
     st.markdown("### 🔐 관리자 시스템")
     admin_password = st.text_input("관리자 비밀번호 입력", type="password")
     
+    # 요청하신 비밀번호 '1234' 조건 매칭
     if admin_password == "1234":
         st.success("🔑 관리자 권한 확인")
         st.markdown("##### 🛠️ 수동 점검 완료 처리")
         
+        # 실제 당일 제출 데이터 가공 확인
         today_submitted_raw = filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].unique().tolist() if not filtered_df.empty else []
         
+        # 마스터 DB 기준 미실시 목록 역추적 (이미 수동 완료 처리된 곳도 제외)
         if not db_master.empty:
-            missing_sites_for_admin = db_master[~db_master['표준현장명'].isin(today_submitted_raw)]['현장명'].unique().tolist()
+            missing_sites_for_admin = db_master[
+                (~db_master['표준현장명'].isin(today_submitted_raw)) & 
+                (~db_master['표준현장명'].isin(st.session_state['manual_done_sites']))
+            ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
                 selected_site = st.selectbox("실시로 변경할 현장", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환"):
-                    
-                    try:
-                        df_check = pd.read_csv('data.csv', encoding='cp949')
-                        enc = 'cp949'
-                    except:
-                        df_check = pd.read_csv('data.csv', encoding='utf-8')
-                        enc = 'utf-8'
-                    
-                    orig_cols = df_check.columns.tolist()
-                    
-                    def match_orig_col(keywords, default_val):
-                        for c in orig_cols:
-                            if any(kw in c for kw in keywords):
-                                return c
-                        for c in orig_cols:
-                            clean_c = re.sub(r'\s', '', c)
-                            if any(kw in clean_c for kw in keywords):
-                                return c
-                        return default_val
-
-                    col_user = match_orig_col(['참여자', '작성자', '보고자'], orig_cols[0] if len(orig_cols) > 0 else '작성자')
-                    col_site = match_orig_col(['사업장명', '사업장 명', '지점명', '사업장'], orig_cols[1] if len(orig_cols) > 1 else '사업장명')
-                    col_time = match_orig_col(['날짜', '일자', '응답일시'], orig_cols[2] if len(orig_cols) > 2 else '날짜')
-                    col_temp = match_orig_col(['체감온도', '기온', '온도'], '체감온도')
-                    col_warn = match_orig_col(['폭염특보', '특보'], '폭염특보여부')
-                    col_act1 = match_orig_col(['예방조치', '1단계', '평상시조치'], '평상시조치')
-                    col_act2 = match_orig_col(['35도', '2단계'], '35도이상조치')
-                    col_act3 = match_orig_col(['38도', '3단계'], '38도이상조치')
-                    col_bev  = match_orig_col(['음료', '물', '식수'], '음료제공방식')
-                    col_sens = match_orig_col(['민감군', '취약'], '민감군관리')
-                    col_emg  = match_orig_col(['응급조치', '행동요령', '숙지'], '응급조치숙지')
-                    col_note = match_orig_col(['특이사항', '종합의견', '코멘트', '비고'], '특이사항')
-
-                    new_report = {
-                        col_user: '현장소장', 
-                        col_site: selected_site, 
-                        col_time: datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'), 
-                        col_temp: '28.5', 
-                        col_warn: '경보 없음', 
-                        col_act1: '물/음료 지급 | 그늘막 설치 | TBM 안전교육 실시', 
-                        col_act2: '해당 없음', 
-                        col_act3: '해당 없음', 
-                        col_bev:  '식수대 운영 및 포도당 알약 제공', 
-                        col_sens: '해당 현장 없음', 
-                        col_emg:  '예', 
-                        col_note: '금일 현장 기상 및 특이사항 양호합니다.'
-                    }
-                    
-                    df_append = pd.DataFrame([new_report], columns=orig_cols)
-                    df_append.fillna("", inplace=True) 
-                    
-                    df_new = pd.concat([df_check, df_append], ignore_index=True)
-                    df_new.to_csv('data.csv', index=False, encoding=enc)
-                    
-                    st.cache_data.clear() 
-                    st.toast(f"📢 [{selected_site}] 현장이 정상 실시 처리되어 저장되었습니다.", icon="✅")
+                    # 표준 명칭으로 변환하여 세션 상태에 저장
+                    standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
+                    st.session_state['manual_done_sites'].add(standard_name)
+                    st.toast(f"📢 [{selected_site}] 현장이 수동 완료 처리되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
+                
+            if st.session_state['manual_done_sites']:
+                if st.button("🔄 수동 변경 내역 전체 초기화"):
+                    st.session_state['manual_done_sites'].clear()
+                    st.toast("모든 수동 조치 내역이 리셋되었습니다.")
+                    st.rerun()
     elif admin_password:
         st.error("❌ 비밀번호가 틀렸습니다.")
 
@@ -322,10 +276,24 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
+    # 💡 수동 점검 처리된 가상 행 생성 로직 (총괄 화면 카운트 일치를 위함)
+    if st.session_state['manual_done_sites'] and not db_master.empty:
+        for m_site in st.session_state['manual_done_sites']:
+            if today_df.empty or m_site not in today_df['사업장명'].values:
+                # 데이터가 아예 없는 곳에 수동 처리 시 가상 행 대입
+                new_row = {col: "" for col in today_df.columns}
+                new_row['사업장명'] = m_site
+                new_row['체감온도_수치'] = 25.0 # 일반 기온 기본값 위임
+                new_row['폭염특보여부'] = "일반(수동완료)"
+                new_row['참여자'] = "본사 보건관리자"
+                new_row['평상시조치'] = "본사 수동 점검 승인 완료"
+                today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
+
     if not today_df.empty:
         def get_alert_badge_by_row(row):
             temp = row['체감온도_수치']
             warn = str(row['폭염특보여부'])
+            if '수동완료' in warn: return "🟢 일반 (수동완료)"
             if pd.notna(temp) and temp != "":
                 try:
                     temp = float(temp)
@@ -357,7 +325,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         critical_count = sum(today_df["체감온도_수치"].apply(lambda x: float(x) >= 35.0 if x != "" else False) | today_df["응급조치숙지"].astype(str).apply(lambda x: "아니오" in x or "모르" in x))
         
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", "실시간 전사 보고 기준")
+        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", f"수동 완료 {len(st.session_state['manual_done_sites'])}곳 포함")
         kpi2.metric("폭염 기상특보 발효", f"{warning_count}개 현장", "기상청 실시간 발효 기준")
         kpi3.metric("집중 보건 관리 요구지", f"{critical_count}개소", "35도 돌파 및 교육 필요처")
         
@@ -422,6 +390,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
                         st.rerun()
         else:
             st.success("✅ 금일 기준 체감온도 33℃ 이상인 우려 사업장이 없습니다.")
+            
     else:
         st.info("ℹ️ 선택한 기준일에 제출된 현장 점검 데이터가 없습니다.")
 
@@ -439,6 +408,20 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             st.rerun()
 
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
+    
+    # 조치대장에도 가상 수동 정보 노출 적용
+    if st.session_state['manual_done_sites'] and not db_master.empty:
+        for m_site in st.session_state['manual_done_sites']:
+            if today_df.empty or m_site not in today_df['사업장명'].values:
+                new_row = {col: "" for col in today_df.columns}
+                new_row['사업장명'] = m_site
+                new_row['체감온도_수치'] = 25.0
+                new_row['폭염특보여부'] = "일반 (본사 수동 조치 완료)"
+                new_row['참여자'] = "본사 보건관리자"
+                new_row['평상시조치'] = "본사 수동 이행 상태 확인"
+                new_row['특이사항'] = "관리자 권한으로 수동 점검 완료 처리된 사업장입니다."
+                today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
+
     site_df = today_df.sort_values('체감온도_수치', ascending=False).copy() if not today_df.empty else pd.DataFrame()
     
     if search_query:
@@ -449,7 +432,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
     else:
         for idx, row in site_df.iterrows():
             is_high = float(row["체감온도_수치"]) >= 35.0 if row["체감온도_수치"] != "" else False
-            m_label = "🔥 35도이상 집중관리" if is_high else "🟢 일반보건"
+            m_label = "🔵 수동조치완료" if "수동" in str(row['폭염특보여부']) else ("🔥 35도이상 집중관리" if is_high else "🟢 일반보건")
             
             header_title = f"[{m_label}] {row['사업장명']} (체감 {f'{float(row['체감온도_수치']):.1f}' if row['체감온도_수치']!='' else 'N/A'}°C) | 책임관리자: {row['참여자']}"
             is_auto_expand = (st.session_state.expanded_site == row['사업장명'])
@@ -508,16 +491,18 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                         </div>
                     """, unsafe_allow_html=True)
                 
-                st.markdown("#### 📈 체감온도 누적 변화 추이")
-                history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
-                if not history_df.empty:
-                    fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
-                    fig.update_traces(line_color="#e11d48", line_width=3, textposition="top center", texttemplate='%{text:.1f}℃')
-                    fig.update_layout(xaxis=dict(tickformat="%m-%d"), yaxis=dict(title="", automargin=True), height=250, margin=dict(l=80, r=10, t=40, b=10))
-                    st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
+                # 가상 수동 변경 열의 경우 차트 예외 처리
+                if row['참여자'] != "본사 보건관리자":
+                    st.markdown("#### 📈 체감온도 누적 변화 추이")
+                    history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
+                    if not history_df.empty:
+                        fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
+                        fig.update_traces(line_color="#e11d48", line_width=3, textposition="top center", texttemplate='%{text:.1f}℃')
+                        fig.update_layout(xaxis=dict(tickformat="%m-%d"), yaxis=dict(title="", automargin=True), height=250, margin=dict(l=80, r=10, t=40, b=10))
+                        st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
 
 # ------------------------------------------
-# MODE 3: 팀별 실시 현황 (DB 연동)
+# MODE 3: 팀별 제출 현황 (DB 연동)
 # ------------------------------------------
 elif st.session_state.current_tab == "✅ 팀별 실시 현황":
     st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
@@ -529,6 +514,10 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
         
+        # 💡 수동으로 제출 처리한 사이트 목록을 제출완료 리스트에 합산 반영
+        if st.session_state['manual_done_sites']:
+            submitted_sites = list(set(submitted_sites + list(st.session_state['manual_done_sites'])))
+
         target_teams = ['관리1팀', '관리2팀', '관리3팀', '영업2본부']
         
         col_t1, col_t2, col_t3, col_t4 = st.columns(4)
@@ -563,6 +552,11 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
                     if not submitted.empty:
                         for site in submitted['현장명'].tolist():
-                            st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
+                            std_name = standardize_site_name(site, valid_db_names_tuple)
+                            # 관리자 권한 수동 조치 대상 식별 꼬리표 부여
+                            if std_name in st.session_state['manual_done_sites']:
+                                st.markdown(f"<div class='status-box done-box' style='border-left: 4px solid #2563eb;'><b>{site} (수동완료)</b></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"<div class='status-box done-box'><b>{site}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
