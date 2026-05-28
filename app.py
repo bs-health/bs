@@ -55,11 +55,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 💾 파일 입출력 헬퍼 함수 (영구 저장용)
+# 💾 파일 입출력 헬퍼 함수 (영구 저장용 - 날짜 매칭 방식 고도화)
 DB_FILE = "manual_done_sites.txt"
 
 def load_manual_sites():
-    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다."""
+    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다 (형식: 현장명|YYYY-MM-DD)."""
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return set([line.strip() for line in f.readlines() if line.strip()])
@@ -250,6 +250,17 @@ with st.sidebar:
         today_kst = current_today
         filtered_df = pd.DataFrame()
 
+    # 💡 [핵심 연동 변수] 대시보드 상단에서 선택된 모니터링 일자의 문자열 포맷 추출 (YYYY-MM-DD)
+    target_date_str = str(today_kst)
+
+    # 💡 전체 수동 완료 풀 세트에서 '현재 선택된 기준일'에 해당하는 현장만 필터링하여 active 세트 생성
+    current_day_done_sites = set()
+    for item in st.session_state['manual_done_sites']:
+        if '|' in item:
+            s_name, s_date = item.split('|', 1)
+            if s_date == target_date_str:
+                current_day_done_sites.add(s_name)
+
     # 🔐 관리자 인증 시스템
     st.markdown("---")
     st.markdown("### 🔐 관리자 시스템")
@@ -265,16 +276,18 @@ with st.sidebar:
         if not db_master.empty:
             missing_sites_for_admin = db_master[
                 (~db_master['표준현장명'].isin(today_submitted_raw)) & 
-                (~db_master['표준현장명'].isin(st.session_state['manual_done_sites']))
+                (~db_master['표준현장명'].isin(current_day_done_sites))
             ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
                 selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
-                    st.session_state['manual_done_sites'].add(standard_name)
+                    
+                    # 💡 현장명 뒤에 현재 매칭된 날짜 스탬프를 함께 결합하여 고유 키 저장
+                    st.session_state['manual_done_sites'].add(f"{standard_name}|{target_date_str}")
                     save_manual_sites(st.session_state['manual_done_sites'])
-                    st.toast(f"📢 [{selected_site}] 현장이 실시 처리 및 저장되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 {target_date_str} 부로 실시 처리 및 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
@@ -316,8 +329,9 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    if st.session_state['manual_done_sites'] and not db_master.empty:
-        for m_site in st.session_state['manual_done_sites']:
+    # 💡 오늘 자 날짜에만 바인딩된 수동 조치 현장 피드 삽입
+    if current_day_done_sites and not db_master.empty:
+        for m_site in current_day_done_sites:
             if today_df.empty or m_site not in today_df['사업장명'].values:
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
@@ -362,7 +376,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         critical_count = sum(today_df["체감온도_수치"].apply(lambda x: float(x) >= 35.0 if x != "" else False) | today_df["응급조치숙지"].astype(str).apply(lambda x: "아니오" in x or "모르" in x))
         
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", f"수동 승인 {len(st.session_state['manual_done_sites'])}곳 포함")
+        kpi1.metric("당일 점검 완료 사업장", f"{len(today_df)}개소", f"수동 승인 {len(current_day_done_sites)}곳 포함")
         kpi2.metric("폭염 기상특보 발효", f"{warning_count}개 현장", "기상청 실시간 발효 기준")
         kpi3.metric("집중 보건 관리 요구지", f"{critical_count}개소", "35도 돌파 및 교육 필요처")
         
@@ -446,8 +460,8 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
 
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    if st.session_state['manual_done_sites'] and not db_master.empty:
-        for m_site in st.session_state['manual_done_sites']:
+    if current_day_done_sites and not db_master.empty:
+        for m_site in current_day_done_sites:
             if today_df.empty or m_site not in today_df['사업장명'].values:
                 new_row = {col: "" for col in today_df.columns}
                 new_row['사업장명'] = m_site
@@ -485,7 +499,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                                 <tr><td style="font-weight: bold; width: 40%; color: #475569;">보고자</td><td>{row['참여자']}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">점검시간</td><td>{date_str}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{f"{float(row['체감온도_수치']):.1f} ℃" if row['체감온도_수치']!='' else 'N/A'}</span></td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보발효</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여부']}</td></tr>
+                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보발효</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여7부']}</td></tr>
                             </table>
                         </div>
                     """, unsafe_allow_html=True)
@@ -549,8 +563,9 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
         
-        if st.session_state['manual_done_sites']:
-            submitted_sites = list(set(submitted_sites + list(st.session_state['manual_done_sites'])))
+        # 💡 오늘 날짜 기준으로 승인된 수동 리스트만 제출 완료 풀(submitted_sites)에 병합
+        if current_day_done_sites:
+            submitted_sites = list(set(submitted_sites + list(current_day_done_sites)))
 
         target_teams = ['관리1팀', '관리2팀', '관리3팀', '영업2본부']
         
@@ -576,7 +591,7 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 🔍 [추가 기능] 부서 내부 전용 미실시 사업장 검색 필드 생성
+                # 🔍 부서 내부 전용 미실시 사업장 검색 필드
                 team_search_query = st.text_input(
                     f"🔍 {team} 미실시 검색", 
                     key=f"search_{team}", 
@@ -584,13 +599,12 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                     label_visibility="collapsed"
                 )
                 
-                # 사용자가 검색창에 글자를 입력하면 실시간으로 해당 팀의 미실시 리스트를 필터링합니다.
                 if team_search_query:
                     filtered_missing = missing[missing['현장명'].astype(str).str.contains(team_search_query, na=False)]
                 else:
                     filtered_missing = missing
                 
-                # ❌ 미실시 현장 관리 영역 (필터링된 리스트 바인딩)
+                # ❌ 미실시 현장 관리 영역
                 with st.expander(f"❌ 미실시 현장 ({len(filtered_missing)}곳)", expanded=True):
                     if not filtered_missing.empty:
                         for idx, row_missing in filtered_missing.iterrows():
@@ -598,14 +612,13 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             std_name = row_missing['표준현장명']
                             
                             if is_admin:
-                                # 관리자 세션: 이전 UI 스타일을 반영한 버튼 형태 활성화 (클릭 시 실시 완료로 전환 후 파일 자동저장)
+                                # 💡 클릭 시 현재 날짜 꼬리표를 명확히 붙여 저장 처리
                                 if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].add(std_name)
+                                    st.session_state['manual_done_sites'].add(f"{std_name}|{target_date_str}")
                                     save_manual_sites(st.session_state['manual_done_sites'])
-                                    st.toast(f"📢 [{site_raw_name}] 현장이 실시 상태로 변경되었습니다.", icon="✅")
+                                    st.toast(f"📢 [{site_raw_name}] 현장이 {target_date_str} 부로 실시 변경되었습니다.", icon="✅")
                                     st.rerun()
                             else:
-                                # 일반 사용자 세션: 이전 버전과 완벽하게 동일한 단순 화이트 박스 형태 유지
                                 st.markdown(f"<div class='status-box missing-box'>{site_raw_name}</div>", unsafe_allow_html=True)
                     else:
                         if team_search_query:
@@ -613,23 +626,21 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                         else:
                             st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
                 
-                # ✅ 실시 완료 현장 관리 영역 (쌍방향 스위칭 적용)
+                # ✅ 실시 완료 현장 관리 영역 (당일 수동 등록 건만 되돌리기 가능)
                 with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
                     if not submitted.empty:
                         for idx, row_submitted in submitted.iterrows():
                             site_raw_name = row_submitted['현장명']
                             std_name = row_submitted['표준현장명']
                             
-                            # 수동 조치로 추가된 건인 경우에 한하여 실시 -> 미실시 토글 가능하도록 연동
-                            if is_admin and (std_name in st.session_state['manual_done_sites']):
-                                # 관리자 세션: 클릭 시 수동완료 목록에서 제외하여 미실시 상태로 복원 후 자동저장
+                            # 💡 현재 선택된 날짜와 일치하는 수동 변경 데이터 패킷만 식별해 복구 활성화
+                            if is_admin and (f"{std_name}|{target_date_str}" in st.session_state['manual_done_sites']):
                                 if st.button(f"↩️ {site_raw_name}", key=f"toggle_done_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].discard(std_name)
+                                    st.session_state['manual_done_sites'].discard(f"{std_name}|{target_date_str}")
                                     save_manual_sites(st.session_state['manual_done_sites'])
-                                    st.toast(f"📢 [{site_raw_name}] 현장이 다시 미실시 상태로 되돌아갔습니다.", icon="🔄")
+                                    st.toast(f"📢 [{site_raw_name}] 현장이 {target_date_str} 자로 다시 미실시 환원되었습니다.", icon="🔄")
                                     st.rerun()
                             else:
-                                # 일반 사용자 및 실제 데이터 제출 현장: 순수 완료 상태 유지 (수동완료 표시 제거)
                                 st.markdown(f"<div class='status-box done-box'><b>{site_raw_name}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
