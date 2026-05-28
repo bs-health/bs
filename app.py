@@ -55,11 +55,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 💾 파일 입출력 헬퍼 함수 (영구 저장용 - 날짜 매칭 방식 고도화)
+# 💾 파일 입출력 헬퍼 함수 (영구 저장용)
 DB_FILE = "manual_done_sites.txt"
 
 def load_manual_sites():
-    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다 (형식: 현장명|YYYY-MM-DD)."""
+    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다."""
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return set([line.strip() for line in f.readlines() if line.strip()])
@@ -196,7 +196,9 @@ def load_data(valid_db_names):
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
     df['체감온도_수치'] = df['체감온도'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
-    df['특보발효건수'] = df['폭염특보여부'].astype(str).apply(lambda x: 1 if '발표됨' in x or '예' in x or '경보' in x or '주의보' in x else 0)
+    
+    warn_series = df['폭염특보여부'].fillna("").astype(str)
+    df['특보발효건수'] = warn_series.str.contains('발표됨|예|경보|주의보', regex=True).astype(int)
     
     return df
 
@@ -250,15 +252,15 @@ with st.sidebar:
         today_kst = current_today
         filtered_df = pd.DataFrame()
 
-    # 💡 [핵심 연동 변수] 대시보드 상단에서 선택된 모니터링 일자의 문자열 포맷 추출 (YYYY-MM-DD)
-    target_date_str = str(today_kst)
+    # 기준일 문자열 포맷 추출 (YYYY-MM-DD)
+    date_str_key = str(today_kst)
 
-    # 💡 전체 수동 완료 풀 세트에서 '현재 선택된 기준일'에 해당하는 현장만 필터링하여 active 세트 생성
+    # 선택된 날짜에 조치한 수동 완료 데이터 필터링
     current_day_done_sites = set()
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
             s_name, s_date = item.split('|', 1)
-            if s_date == target_date_str:
+            if s_date == date_str_key:
                 current_day_done_sites.add(s_name)
 
     # 🔐 관리자 인증 시스템
@@ -284,10 +286,9 @@ with st.sidebar:
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
                     
-                    # 💡 현장명 뒤에 현재 매칭된 날짜 스탬프를 함께 결합하여 고유 키 저장
-                    st.session_state['manual_done_sites'].add(f"{standard_name}|{target_date_str}")
+                    st.session_state['manual_done_sites'].add(f"{standard_name}|{date_str_key}")
                     save_manual_sites(st.session_state['manual_done_sites'])
-                    st.toast(f"📢 [{selected_site}] 현장이 {target_date_str} 부로 실시 처리 및 저장되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리 및 저장되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
@@ -329,7 +330,6 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 💡 오늘 자 날짜에만 바인딩된 수동 조치 현장 피드 삽입
     if current_day_done_sites and not db_master.empty:
         for m_site in current_day_done_sites:
             if today_df.empty or m_site not in today_df['사업장명'].values:
@@ -492,6 +492,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 
                 with col_left:
                     date_str = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) and row['날짜_dt'] != "" else str(today_kst)
+                    # 🎯 오타 수정 연동 완료 구역 (row['폭염특보여7부'] -> row['폭염특보여부'])
                     st.markdown(f"""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
                             <h4 style="margin-top:0; color: #1e3a8a; font-size: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📋 현장 기본 정보</h4>
@@ -499,7 +500,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                                 <tr><td style="font-weight: bold; width: 40%; color: #475569;">보고자</td><td>{row['참여자']}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">점검시간</td><td>{date_str}</td></tr>
                                 <tr><td style="font-weight: bold; color: #475569;">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{f"{float(row['체감온도_수치']):.1f} ℃" if row['체감온도_수치']!='' else 'N/A'}</span></td></tr>
-                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보발효</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여7부']}</td></tr>
+                                <tr><td style="font-weight: bold; color: #475569;">기상청 특보발효</td><td style="color: #ea580c; font-weight: bold;">{row['폭염특보여부']}</td></tr>
                             </table>
                         </div>
                     """, unsafe_allow_html=True)
@@ -534,113 +535,4 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     """, unsafe_allow_html=True)
                     
                     notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
-                    st.markdown(f"""
-                        <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
-                            <h4 style="margin-top:0; color: #0f172a; font-size: 15px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">✍️ 현장 소장 종합 코멘트</h4>
-                            <div style="font-size: 13px; color: #475569; font-style: italic;">"{notes_text}"</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                
-                if row['참여자'] != "본사 보건관리자":
-                    st.markdown("#### 📈 체감온도 누적 변화 추이")
-                    history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
-                    if not history_df.empty:
-                        fig = px.line(history_df, x="날짜", y="체감온도_수치", text="체감온도_수치", markers=True)
-                        fig.update_traces(line_color="#e11d48", line_width=3, textposition="top center", texttemplate='%{text:.1f}℃')
-                        fig.update_layout(xaxis=dict(tickformat="%m-%d"), yaxis=dict(title="", automargin=True), height=250, margin=dict(l=80, r=10, t=40, b=10))
-                        st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{row['사업장명']}_{idx}")
-
-# ------------------------------------------
-# MODE 3: 팀별 실시 현황 (DB 연동)
-# ------------------------------------------
-elif st.session_state.current_tab == "✅ 팀별 실시 현황":
-    st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
-    st.markdown("<p style='font-size: 13px; color: #64748b; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출된 현장과 제출되지 않은 현장을 추적합니다.</p>", unsafe_allow_html=True)
-
-    if db_master.empty:
-        st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 컬럼이 존재하지 않습니다. 파일을 확인해주세요.")
-    else:
-        today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
-        submitted_sites = today_df['사업장명'].unique().tolist() if not today_df.empty else []
-        
-        # 💡 오늘 날짜 기준으로 승인된 수동 리스트만 제출 완료 풀(submitted_sites)에 병합
-        if current_day_done_sites:
-            submitted_sites = list(set(submitted_sites + list(current_day_done_sites)))
-
-        target_teams = ['관리1팀', '관리2팀', '관리3팀', '영업2본부']
-        
-        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
-        for i, team in enumerate(target_teams):
-            team_df = db_master[db_master['관리팀'] == team]
-            total_count = len(team_df)
-            submitted = team_df[team_df['표준현장명'].isin(submitted_sites)]
-            missing = team_df[~team_df['표준현장명'].isin(submitted_sites)]
-            
-            sub_count = len(submitted)
-            rate = int((sub_count / total_count * 100)) if total_count > 0 else 0
-            
-            cols = [col_t1, col_t2, col_t3, col_t4]
-            with cols[i]:
-                st.markdown(f"""
-                <div style="background-color: #ffffff; border-radius: 12px; padding: 15px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 10px;">
-                    <h3 style="margin-top:0; color: #1e293b; font-size: 18px; text-align: center;">{team}</h3>
-                    <div style="text-align: center; margin-bottom: 10px;">
-                        <span style="font-size: 32px; font-weight: bold; color: {'#22c55e' if rate == 100 else '#3b82f6'};">{rate}%</span>
-                        <div style="font-size: 13px; color: #64748b;">(제출 {sub_count} / 전체 {total_count})</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 🔍 부서 내부 전용 미실시 사업장 검색 필드
-                team_search_query = st.text_input(
-                    f"🔍 {team} 미실시 검색", 
-                    key=f"search_{team}", 
-                    placeholder="사업장명 검색...",
-                    label_visibility="collapsed"
-                )
-                
-                if team_search_query:
-                    filtered_missing = missing[missing['현장명'].astype(str).str.contains(team_search_query, na=False)]
-                else:
-                    filtered_missing = missing
-                
-                # ❌ 미실시 현장 관리 영역
-                with st.expander(f"❌ 미실시 현장 ({len(filtered_missing)}곳)", expanded=True):
-                    if not filtered_missing.empty:
-                        for idx, row_missing in filtered_missing.iterrows():
-                            site_raw_name = row_missing['현장명']
-                            std_name = row_missing['표준현장명']
-                            
-                            if is_admin:
-                                # 💡 클릭 시 현재 날짜 꼬리표를 명확히 붙여 저장 처리
-                                if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].add(f"{std_name}|{target_date_str}")
-                                    save_manual_sites(st.session_state['manual_done_sites'])
-                                    st.toast(f"📢 [{site_raw_name}] 현장이 {target_date_str} 부로 실시 변경되었습니다.", icon="✅")
-                                    st.rerun()
-                            else:
-                                st.markdown(f"<div class='status-box missing-box'>{site_raw_name}</div>", unsafe_allow_html=True)
-                    else:
-                        if team_search_query:
-                            st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>검색 결과가 없습니다.</div>", unsafe_allow_html=True)
-                        else:
-                            st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
-                
-                # ✅ 실시 완료 현장 관리 영역 (당일 수동 등록 건만 되돌리기 가능)
-                with st.expander(f"✅ 실시 완료 ({len(submitted)}곳)", expanded=False):
-                    if not submitted.empty:
-                        for idx, row_submitted in submitted.iterrows():
-                            site_raw_name = row_submitted['현장명']
-                            std_name = row_submitted['표준현장명']
-                            
-                            # 💡 현재 선택된 날짜와 일치하는 수동 변경 데이터 패킷만 식별해 복구 활성화
-                            if is_admin and (f"{std_name}|{target_date_str}" in st.session_state['manual_done_sites']):
-                                if st.button(f"↩️ {site_raw_name}", key=f"toggle_done_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].discard(f"{std_name}|{target_date_str}")
-                                    save_manual_sites(st.session_state['manual_done_sites'])
-                                    st.toast(f"📢 [{site_raw_name}] 현장이 {target_date_str} 자로 다시 미실시 환원되었습니다.", icon="🔄")
-                                    st.rerun()
-                            else:
-                                st.markdown(f"<div class='status-box done-box'><b>{site_raw_name}</b></div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
+                    st.markdown(f
