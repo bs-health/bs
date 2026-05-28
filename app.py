@@ -315,12 +315,14 @@ with st.sidebar:
             ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
+                # 사이드바 선택 리스트 가나다 정렬
+                missing_sites_for_admin.sort()
                 selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
                     st.session_state['manual_done_sites'].add(f"{standard_name}|{date_str_key}")
                     save_manual_sites(st.session_state['manual_done_sites'])
-                    st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리 및 저장되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리되었습니다.", icon="✅")
                     st.rerun()
             else:
                 st.info("모든 사업장이 제출을 완료했습니다.")
@@ -608,8 +610,10 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
         for i, team in enumerate(target_teams):
             team_df = db_master[db_master['관리팀'] == team]
             total_count = len(team_df)
-            submitted = team_df[team_df['표준현장명'].isin(submitted_sites)]
-            missing = team_df[~team_df['표준현장명'].isin(submitted_sites)]
+            
+            # ⭐️ [가나다 정제 포인트] 미실시 및 실시 리스트를 기본 '현장명' 기준으로 정렬 정제
+            submitted = team_df[team_df['표준현장명'].isin(submitted_sites)].sort_values(by='현장명')
+            missing = team_df[~team_df['표준현장명'].isin(submitted_sites)].sort_values(by='현장명')
             
             sub_count = len(submitted)
             rate = int((sub_count / total_count * 100)) if total_count > 0 else 0
@@ -634,7 +638,7 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 )
                 
                 if team_search_query:
-                    filtered_missing = missing[missing['현장명'].astype(str).str.contains(team_search_query, na=False)]
+                    filtered_missing = missing[missing['현장명'].astype(str).str.contains(team_search_query, na=False)].sort_values(by='현장명')
                 else:
                     filtered_missing = missing
                 
