@@ -1,8 +1,8 @@
-기존 네이버 폼으로 입력받았던 원본 데이터의 조치 내용들이 깨지거나 간략하게 압축되지 않고, **이전 대시보드 화면처럼 항목별 박스 레이아웃 안에 데이터 원본 그대로 풍부하게 렌더링되도록 전국 사업장 조치대장(MODE 2) 파트를 복원 및 개조**했습니다.
+아이구, 제가 조치대장 렌더링 오류를 고치는 데 집중하느라 코드 창 맨 위에 한글 설명글을 또 지우지 않고 그대로 넣어드렸네요! 🤦‍♀️ 연달아 코드가 막혀서 정말 답답하셨을 텐데 번거롭게 해드려 죄송합니다.
 
-텍스트 줄바꿈 가독성을 높이기 위해 데이터 내에 존재할 수 있는 파이프라인 기호(`|`)를 자연스러운 줄바꿈 기호(`\n`) 또는 리스트 형태로 풀어내어 깔끔하게 출력되도록 연동했습니다.
+이번에는 앞에 붙어 있던 한글 설명글을 완전히 삭제하고, 곧바로 복사해서 `app.py`에 전체 덮어쓰기(Ctrl+A 후 붙여넣기)하시면 바로 정상 작동하는 순수 파이썬 소스코드만 깔끔하게 올려드립니다.
 
-### 🛠️ 데이터 연동 및 출력이 정상 복원된 전체 소스코드
+### 🛠️ 정상 복원된 전체 소스코드
 
 ```python
 import streamlit as st
@@ -295,7 +295,7 @@ with st.sidebar:
     else:
         default_idx = 0 
         if available_dates:
-            st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 automatic 매칭되었습니다.")
+            st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 자동 매칭되었습니다.")
 
     if available_dates:
         today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx)
@@ -497,7 +497,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         st.info("ℹ️ 선택한 기준일에 제출된 현장 점검 데이터가 없습니다.")
 
 # ------------------------------------------
-# MODE 2: 전국 사업장 조치대장 ⭐️ [네이버폼 원본 텍스트 매칭 및 출력 전면 복원]
+# MODE 2: 전국 사업장 조치대장
 # ------------------------------------------
 elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
     st.subheader("🏢 전국 사업장 개별 온열조치 상세 보고")
@@ -539,11 +539,14 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             is_auto_expand = (st.session_state.expanded_site == row['사업장명'])
             
             with st.expander(header_title, expanded=is_auto_expand):
-                # 🎨 UI가 박살나지 않으면서 원본 데이터를 100% 보존하는 Streamlit 네이티브 그리드 스킨
                 col_left, col_right = st.columns(2)
                 
                 with col_left:
                     # 박스 1: 현장 기본 정보
+                    p1_text = row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"
+                    p2_text = row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"
+                    p3_text = row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"
+                    
                     st.markdown(f"""
                     <div class="report-card">
                         <h4>📋 현장 기본 정보</h4>
@@ -556,20 +559,20 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 박스 2: 핵심 보건 관리 항목 (네이버 폼 원본 입력 텍스트 바인딩)
+                    # 박스 2: 핵심 보건 관리 항목
                     st.markdown(f"""
                     <div class="report-card">
                         <h4>✔️ 핵심 보건 관리 항목</h4>
                         <table class="info-table">
-                            <tr><td class="label">식수 및 음료지급</td><td>{row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"}</td></tr>
-                            <tr><td class="label">민감근로자 관리</td><td>{row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"}</td></tr>
-                            <tr><td class="label">비상 응급조치</td><td>{row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"}</td></tr>
+                            <tr><td class="label">식수 및 음료지급</td><td>{p1_text}</td></tr>
+                            <tr><td class="label">민감근로자 관리</td><td>{p2_text}</td></tr>
+                            <tr><td class="label">비상 응급조치</td><td>{p3_text}</td></tr>
                         </table>
                     </div>
                     """, unsafe_allow_html=True)
 
                 with col_right:
-                    # 박스 3: 단계별 조치 이행 실태 (줄바꿈 및 구분자 분리 완벽 복원)
+                    # 박스 3: 단계별 조치 이행 실태
                     p1_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['평상시조치']).split('|') if act.strip()])
                     p2_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['35도이상조치']).split('|') if act.strip() and act.strip() != 'nan'])
                     p3_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['38도이상조치']).split('|') if act.strip() and act.strip() != 'nan'])
@@ -588,7 +591,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 박스 4: 현장 소장 종합 코멘트 (원본 그대로 반영)
+                    # 박스 4: 현장 소장 종합 코멘트
                     notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
                     st.markdown(f"""
                     <div class="report-card" style="background-color: #f8fafc;">
@@ -597,7 +600,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # 시계열 추이 그래프 출력 유지
                 if row['참여자'] != "본사 보건관리자":
                     st.markdown("#### 📈 체감온도 누적 변화 추이")
                     history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
