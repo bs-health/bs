@@ -1,15 +1,8 @@
-아이구, 제가 조치대장 렌더링 오류를 고치는 데 집중하느라 코드 창 맨 위에 한글 설명글을 또 지우지 않고 그대로 넣어드렸네요! 🤦‍♀️ 연달아 코드가 막혀서 정말 답답하셨을 텐데 번거롭게 해드려 죄송합니다.
-
-이번에는 앞에 붙어 있던 한글 설명글을 완전히 삭제하고, 곧바로 복사해서 `app.py`에 전체 덮어쓰기(Ctrl+A 후 붙여넣기)하시면 바로 정상 작동하는 순수 파이썬 소스코드만 깔끔하게 올려드립니다.
-
-### 🛠️ 정상 복원된 전체 소스코드
-
-```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
-import os  # 파일 저장 및 확인을 위해 추가
+import os
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
@@ -37,7 +30,6 @@ st.markdown("""
     .missing-box { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; font-weight: normal; }
     .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
     
-    /* 관리자 인증 시 클릭 가능한 미실시/실시 변경 버튼 스타일 커스텀 (이전 UI 복원) */
     div.stButton > button[key^="toggle_missing_"], div.stButton > button[key^="toggle_done_"] {
         background-color: #ffffff !important;
         color: #0f172a !important;
@@ -60,7 +52,6 @@ st.markdown("""
         border-color: #fca5a5 !important;
     }
     
-    /* 조치대장 전용 카드 컴포넌트 스타일링 */
     .report-card {
         background-color: #ffffff;
         padding: 18px;
@@ -109,23 +100,19 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 💾 파일 입출력 헬퍼 함수 (영구 저장용)
 DB_FILE = "manual_done_sites.txt"
 
 def load_manual_sites():
-    """파일에서 수동 완료 처리된 현장 목록을 불러옵니다."""
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return set([line.strip() for line in f.readlines() if line.strip()])
     return set()
 
 def save_manual_sites(sites_set):
-    """수동 완료 처리된 현장 목록을 파일에 저장합니다."""
     with open(DB_FILE, "w", encoding="utf-8") as f:
         for site in sites_set:
             f.write(f"{site}\n")
 
-# 세션 상태 초기화 (최초 로드 시 파일에서 데이터를 읽어옴)
 if 'manual_done_sites' not in st.session_state:
     st.session_state['manual_done_sites'] = load_manual_sites()
 if 'current_tab' not in st.session_state:
@@ -141,7 +128,6 @@ if 'expanded_site' not in st.session_state:
 
 @st.cache_data(ttl=60)
 def get_valid_db_names():
-    """DB.csv에서 기준이 되는 현장명 리스트를 먼저 학습하여 추출합니다."""
     try:
         db_df = pd.read_csv('DB.csv', encoding='cp949')
     except:
@@ -156,9 +142,7 @@ def get_valid_db_names():
 
 
 def standardize_site_name_base(name):
-    """(1단계 정제) 공백, 자음/모음 오타 제거 및 기본 매핑을 수행합니다."""
     name = re.sub(r'[ㄱ-ㅎㅏ-ㅣ\s]', '', str(name))
-    
     early_mapping = {
         '서울보증': '서울보증보험',
         '경주교원드림센터': '교원경주드림센터',
@@ -184,7 +168,6 @@ def standardize_site_name_base(name):
 
 
 def standardize_site_name(name, valid_db_names):
-    """(2단계 정제) 1단계 정제된 이름을 바탕으로 DB 기준 이름 포함 여부를 확인하여 최종 통일합니다."""
     name = standardize_site_name_base(name)
     if valid_db_names:
         for db_name in sorted(valid_db_names, key=len, reverse=True):
@@ -304,10 +287,8 @@ with st.sidebar:
         today_kst = current_today
         filtered_df = pd.DataFrame()
 
-    # 기준일 문자열 포맷 추출 (YYYY-MM-DD)
     date_str_key = str(today_kst)
 
-    # 선택된 날짜에 조치한 수동 완료 데이터 필터링
     current_day_done_sites = set()
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
@@ -542,7 +523,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 col_left, col_right = st.columns(2)
                 
                 with col_left:
-                    # 박스 1: 현장 기본 정보
                     p1_text = row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"
                     p2_text = row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"
                     p3_text = row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"
@@ -559,7 +539,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 박스 2: 핵심 보건 관리 항목
                     st.markdown(f"""
                     <div class="report-card">
                         <h4>✔️ 핵심 보건 관리 항목</h4>
@@ -572,7 +551,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     """, unsafe_allow_html=True)
 
                 with col_right:
-                    # 박스 3: 단계별 조치 이행 실태
                     p1_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['평상시조치']).split('|') if act.strip()])
                     p2_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['35도이상조치']).split('|') if act.strip() and act.strip() != 'nan'])
                     p3_html = "".join([f"<li>{act.strip()}</li>" for act in str(row['38도이상조치']).split('|') if act.strip() and act.strip() != 'nan'])
@@ -591,7 +569,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 박스 4: 현장 소장 종합 코멘트
                     notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
                     st.markdown(f"""
                     <div class="report-card" style="background-color: #f8fafc;">
@@ -699,5 +676,3 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                                 st.markdown(f"<div class='status-box done-box'><b>{site_raw_name}</b></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
-
-```
