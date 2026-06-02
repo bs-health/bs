@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 페이지 기본 설정 및 프리미엄 화이트 테마 적용 
+# 1. 페이지 기본 설정 및 다크모드/라이트모드 호환 반응형 테마 적용 
 # ==========================================
 st.set_page_config(
     page_title="백상가족 건강한 여름나기 종합 대시보드",
@@ -15,25 +15,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 💡 [핵심 변경] 강제 색상(#ffffff, #000000 등)을 모두 제거하고 Streamlit 네이티브 테마 변수 활용
 st.markdown("""
     <style>
-    .main { background-color: #f8fafc; }
-    div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 900; color: #0f172a; }
+    div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 900; }
     .stAlert { border-radius: 16px; }
     .custom-card {
-        background-color: #ffffff; padding: 20px; border-radius: 16px;
-        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); margin-bottom: 20px;
+        background-color: var(--secondary-background-color); padding: 20px; border-radius: 16px;
+        border: 1px solid rgba(128, 128, 128, 0.2); box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); margin-bottom: 20px;
     }
     table { font-size: 14px !important; }
     .stButton>button { border-radius: 8px; width: 100%; }
-    .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid #e2e8f0; text-align: left; }
-    .missing-box { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; font-weight: normal; }
-    .done-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; }
+    
+    .status-box { padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; border: 1px solid rgba(128, 128, 128, 0.2); text-align: left; }
+    .missing-box { background-color: transparent; border: 1px solid rgba(128, 128, 128, 0.4); font-weight: normal; }
+    .done-box { background-color: rgba(34, 197, 94, 0.1); border-left: 4px solid #22c55e; }
     
     div.stButton > button[key^="toggle_missing_"], div.stButton > button[key^="toggle_done_"] {
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        border: 1px solid #e2e8f0 !important;
+        background-color: transparent !important;
+        color: var(--text-color) !important;
+        border: 1px solid rgba(128, 128, 128, 0.3) !important;
         border-radius: 8px !important;
         text-align: left !important;
         padding: 8px 14px !important;
@@ -44,28 +45,27 @@ st.markdown("""
         box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
     }
     div.stButton > button[key^="toggle_missing_"]:hover {
-        background-color: #f1f5f9 !important;
-        border-color: #cbd5e1 !important;
+        background-color: rgba(128, 128, 128, 0.1) !important;
+        border-color: var(--text-color) !important;
     }
     div.stButton > button[key^="toggle_done_"]:hover {
-        background-color: #fee2e2 !important;
-        border-color: #fca5a5 !important;
+        background-color: rgba(239, 68, 68, 0.1) !important;
+        border-color: #ef4444 !important;
     }
     
     .report-card {
-        background-color: #ffffff;
+        background-color: var(--secondary-background-color);
         padding: 18px;
         border-radius: 12px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid rgba(128, 128, 128, 0.2);
         margin-bottom: 15px;
         box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
     }
     .report-card h4 {
         margin-top: 0;
         margin-bottom: 12px;
-        color: #1e3a8a;
         font-size: 15px;
-        border-bottom: 2px solid #f1f5f9;
+        border-bottom: 2px solid rgba(128, 128, 128, 0.2);
         padding-bottom: 8px;
     }
     .info-table {
@@ -76,16 +76,15 @@ st.markdown("""
         padding: 6px 0;
         font-size: 13.5px;
         vertical-align: top;
-        color: #0f172a;
+        color: var(--text-color);
     }
     .info-table td.label {
         font-weight: bold;
         width: 35%;
-        color: #475569;
+        opacity: 0.7;
     }
     .action-step {
         font-size: 13.5px;
-        color: #334155;
         line-height: 1.6;
     }
     .action-step strong {
@@ -315,7 +314,6 @@ with st.sidebar:
             ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
-                # 사이드바 선택 리스트 가나다 정렬
                 missing_sites_for_admin.sort()
                 selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
@@ -340,7 +338,7 @@ with st.sidebar:
 # ==========================================
 # 4. 화면 구성 및 메인 타이틀
 # ==========================================
-st.markdown("<h1 style='font-size: 2.5rem; color: #0f172a; margin-bottom: 0px;'>☀️ 백상가족 건강한 여름나기 종합 대시보드</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='font-size: 2.5rem; margin-bottom: 0px;'>☀️ 백상가족 건강한 여름나기 종합 대시보드</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 col_tab1, col_tab2, col_tab3 = st.columns(3)
@@ -418,14 +416,15 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         st.markdown("### 🚦 당일 폭염 단계별 사업장 현황판")
         
         c1, c2, c3, c4 = st.columns(4)
+        # 💡 [디자인 개선] 다크모드에서도 텍스트가 보이도록 배경을 반투명으로 수정, 글자색은 가독성 높게 조정
         with c1:
-            st.markdown(f'<div style="background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #991b1b; font-size: 13px;">🔴 폭염중대경보</span><div style="font-size: 26px; font-weight: 900; color: #991b1b; margin-top: 5px;">{len(g_critical)}개소</div><p style="font-size: 11px; color: #7f1d1d; margin-top: 5px; font-weight: bold;">{", ".join(g_critical) if g_critical else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: rgba(239, 68, 68, 0.1); border-left: 5px solid #ef4444; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #ef4444; font-size: 13px;">🔴 폭염중대경보</span><div style="font-size: 26px; font-weight: 900; color: #ef4444; margin-top: 5px;">{len(g_critical)}개소</div><p style="font-size: 11px; margin-top: 5px; opacity: 0.8; font-weight: bold;">{", ".join(g_critical) if g_critical else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
         with c2:
-            st.markdown(f'<div style="background-color: #ffedd5; border-left: 5px solid #f97316; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #c2410c; font-size: 13px;">🟠 폭염경보</span><div style="font-size: 26px; font-weight: 900; color: #c2410c; margin-top: 5px;">{len(g_warning)}개소</div><p style="font-size: 11px; color: #7c2d12; margin-top: 5px; font-weight: bold;">{", ".join(g_warning) if g_warning else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: rgba(249, 115, 22, 0.1); border-left: 5px solid #f97316; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #f97316; font-size: 13px;">🟠 폭염경보</span><div style="font-size: 26px; font-weight: 900; color: #f97316; margin-top: 5px;">{len(g_warning)}개소</div><p style="font-size: 11px; margin-top: 5px; opacity: 0.8; font-weight: bold;">{", ".join(g_warning) if g_warning else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
         with c3:
-            st.markdown(f'<div style="background-color: #fef9c3; border-left: 5px solid #eab308; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #854d0e; font-size: 13px;">🟡 폭염주의보</span><div style="font-size: 26px; font-weight: 900; color: #854d0e; margin-top: 5px;">{len(g_advisory)}개소</div><p style="font-size: 11px; color: #713f12; margin-top: 5px; font-weight: bold;">{", ".join(g_advisory) if g_advisory else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: rgba(234, 179, 8, 0.1); border-left: 5px solid #eab308; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #eab308; font-size: 13px;">🟡 폭염주의보</span><div style="font-size: 26px; font-weight: 900; color: #eab308; margin-top: 5px;">{len(g_advisory)}개소</div><p style="font-size: 11px; margin-top: 5px; opacity: 0.8; font-weight: bold;">{", ".join(g_advisory) if g_advisory else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
         with c4:
-            st.markdown(f'<div style="background-color: #dcfce7; border-left: 5px solid #22c55e; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #166534; font-size: 13px;">🟢 일반</span><div style="font-size: 26px; font-weight: 900; color: #166534; margin-top: 5px;">{len(g_normal)}개소</div><p style="font-size: 11px; color: #14532d; margin-top: 5px; font-weight: bold;">{", ".join(g_normal) if g_normal else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: rgba(34, 197, 94, 0.1); border-left: 5px solid #22c55e; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #22c55e; font-size: 13px;">🟢 일반</span><div style="font-size: 26px; font-weight: 900; color: #22c55e; margin-top: 5px;">{len(g_normal)}개소</div><p style="font-size: 11px; margin-top: 5px; opacity: 0.8; font-weight: bold;">{", ".join(g_normal) if g_normal else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 📋 전사 고온 위험 사업장 관리 현황 요약")
@@ -451,7 +450,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
                 headers = ["사업장명 (클릭이동)", "경보단계", "체감온도", "물/음료", "그늘막", "TBM", "민감군", "응급숙지", "상세분석"]
                 for i, text in enumerate(headers):
                     align = "left" if i==1 else "center"
-                    cols[i].markdown(f"<div style='text-align: {align};'><b style='font-size: 13px; color: #475569;'>{text}</b></div>", unsafe_allow_html=True)
+                    cols[i].markdown(f"<div style='text-align: {align};'><b style='font-size: 13px; opacity: 0.8;'>{text}</b></div>", unsafe_allow_html=True)
                 st.markdown("<hr style='margin: 4px 0 10px 0;'>", unsafe_allow_html=True)
 
                 for s_idx, row_item in enumerate(summary_rows):
@@ -525,7 +524,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 col_left, col_right = st.columns(2)
                 
                 with col_left:
-                    # 💡 식수 및 음료 지급 자동 보정 로직 적용 (1단계 평상시 조치와 교차 검증)
                     p1_text_raw = str(row['평상시조치'])
                     if '깨끗하고 시원한 물' in p1_text_raw or '이온음료' in p1_text_raw or '포도당' in p1_text_raw or '식수' in p1_text_raw:
                         p1_text = "✅ 식수 및 음료 지급 실시 중"
@@ -551,7 +549,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     <div class="report-card">
                         <h4>✔️ 핵심 보건 관리 항목</h4>
                         <table class="info-table">
-                            <tr><td class="label">식수 및 음료지급</td><td style="font-weight:bold; color:#0f172a;">{p1_text}</td></tr>
+                            <tr><td class="label">식수 및 음료지급</td><td style="font-weight:bold;">{p1_text}</td></tr>
                             <tr><td class="label">민감근로자 관리</td><td>{p2_text}</td></tr>
                             <tr><td class="label">비상 응급조치</td><td>{p3_text}</td></tr>
                         </table>
@@ -568,20 +566,20 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                         <h4>🌡️ 단계별 조치 이행 실태</h4>
                         <div class="action-step">
                             <span style="color:#0d9488; font-weight:bold;">[1단계] 평상시 예방 조치:</span>
-                            <ul>{p1_html if p1_html else "<li>제출 데이터 없음</li>"}</ul>
-                            <span style="color:#ea580c; font-weight:bold; margin-top:8px; display:block;">[2단계] 35도 돌파 시 조치:</span>
-                            <ul>{p2_html if p2_html else "<li>해당 사항 없음 (또는 미기재)</li>"}</ul>
-                            <span style="color:#dc2626; font-weight:bold; margin-top:8px; display:block;">[3단계] 38도 돌파 시 조치:</span>
-                            <ul>{p3_html if p3_html else "<li>해당 사항 없음 (또는 미기재)</li>"}</ul>
+                            <ul style="opacity: 0.9; margin-bottom: 8px;">{p1_html if p1_html else "<li>제출 데이터 없음</li>"}</ul>
+                            <span style="color:#ea580c; font-weight:bold; display:block;">[2단계] 35도 돌파 시 조치:</span>
+                            <ul style="opacity: 0.9; margin-bottom: 8px;">{p2_html if p2_html else "<li>해당 사항 없음 (또는 미기재)</li>"}</ul>
+                            <span style="color:#dc2626; font-weight:bold; display:block;">[3단계] 38도 돌파 시 조치:</span>
+                            <ul style="opacity: 0.9;">{p3_html if p3_html else "<li>해당 사항 없음 (또는 미기재)</li>"}</ul>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
                     notes_text = row['특이사항'] if pd.notna(row['특이사항']) and str(row['특이사항']).strip() != "" and str(row['특이사항']) != "nan" else "금일 현장 기상 및 특이사항 양호합니다."
                     st.markdown(f"""
-                    <div class="report-card" style="background-color: #f8fafc;">
-                        <h4 style="color:#0f172a; border-bottom-color:#e2e8f0;">✍️ 현장 소장 종합 코멘트</h4>
-                        <div style="font-size: 13.5px; color: #475569; font-style: italic; line-height:1.5;">"{notes_text}"</div>
+                    <div class="report-card">
+                        <h4>✍️ 현장 소장 종합 코멘트</h4>
+                        <div style="font-size: 13.5px; opacity: 0.8; font-style: italic; line-height:1.5;">"{notes_text}"</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -599,7 +597,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
 # ------------------------------------------
 elif st.session_state.current_tab == "✅ 팀별 실시 현황":
     st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
-    st.markdown("<p style='font-size: 13px; color: #64748b; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출된 현장과 제출되지 않은 현장을 추적합니다.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 13px; opacity: 0.8; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출된 현장과 제출되지 않은 현장을 추적합니다.</p>", unsafe_allow_html=True)
 
     if db_master.empty:
         st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 컬럼이 존재하지 않습니다. 파일을 확인해주세요.")
@@ -626,11 +624,11 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
             cols = [col_t1, col_t2, col_t3, col_t4]
             with cols[i]:
                 st.markdown(f"""
-                <div style="background-color: #ffffff; border-radius: 12px; padding: 15px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 10px;">
-                    <h3 style="margin-top:0; color: #1e293b; font-size: 18px; text-align: center;">{team}</h3>
+                <div style="background-color: var(--secondary-background-color); border-radius: 12px; padding: 15px; border: 1px solid rgba(128,128,128,0.2); box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 10px;">
+                    <h3 style="margin-top:0; font-size: 18px; text-align: center;">{team}</h3>
                     <div style="text-align: center; margin-bottom: 10px;">
                         <span style="font-size: 32px; font-weight: bold; color: {'#22c55e' if rate == 100 else '#3b82f6'};">{rate}%</span>
-                        <div style="font-size: 13px; color: #64748b;">(제출 {sub_count} / 전체 {total_count})</div>
+                        <div style="font-size: 13px; opacity: 0.7;">(제출 {sub_count} / 전체 {total_count})</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -664,7 +662,7 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                                 st.markdown(f"<div class='status-box missing-box'>{site_raw_name}</div>", unsafe_allow_html=True)
                     else:
                         if team_search_query:
-                            st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>검색 결과가 없습니다.</div>", unsafe_allow_html=True)
+                            st.markdown("<div style='font-size: 13px; opacity: 0.7; text-align: center; padding: 10px;'>검색 결과가 없습니다.</div>", unsafe_allow_html=True)
                         else:
                             st.markdown("<div style='font-size: 13px; color: #16a34a; text-align: center; padding: 10px;'>전원 제출 완료 🎉</div>", unsafe_allow_html=True)
                 
@@ -684,4 +682,4 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             else:
                                 st.markdown(f"<div class='status-box done-box'><b>{site_raw_name}</b></div>", unsafe_allow_html=True)
                     else:
-                        st.markdown("<div style='font-size: 13px; color: #94a3b8; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
+                        st.markdown("<div style='font-size: 13px; opacity: 0.7; text-align: center; padding: 10px;'>제출 내역 없음</div>", unsafe_allow_html=True)
