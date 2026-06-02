@@ -525,7 +525,13 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 col_left, col_right = st.columns(2)
                 
                 with col_left:
-                    p1_text = row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"
+                    # 💡 식수 및 음료 지급 자동 보정 로직 적용 (1단계 평상시 조치와 교차 검증)
+                    p1_text_raw = str(row['평상시조치'])
+                    if '깨끗하고 시원한 물' in p1_text_raw or '이온음료' in p1_text_raw or '포도당' in p1_text_raw or '식수' in p1_text_raw:
+                        p1_text = "✅ 식수 및 음료 지급 실시 중"
+                    else:
+                        p1_text = row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"
+                        
                     p2_text = row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"
                     p3_text = row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"
                     
@@ -545,7 +551,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     <div class="report-card">
                         <h4>✔️ 핵심 보건 관리 항목</h4>
                         <table class="info-table">
-                            <tr><td class="label">식수 및 음료지급</td><td>{p1_text}</td></tr>
+                            <tr><td class="label">식수 및 음료지급</td><td style="font-weight:bold; color:#0f172a;">{p1_text}</td></tr>
                             <tr><td class="label">민감근로자 관리</td><td>{p2_text}</td></tr>
                             <tr><td class="label">비상 응급조치</td><td>{p3_text}</td></tr>
                         </table>
@@ -611,7 +617,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
             team_df = db_master[db_master['관리팀'] == team]
             total_count = len(team_df)
             
-            # ⭐️ [가나다 정제 포인트] 미실시 및 실시 리스트를 기본 '현장명' 기준으로 정렬 정제
             submitted = team_df[team_df['표준현장명'].isin(submitted_sites)].sort_values(by='현장명')
             missing = team_df[~team_df['표준현장명'].isin(submitted_sites)].sort_values(by='현장명')
             
