@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 💡 [핵심 변경] 강제 색상(#ffffff, #000000 등)을 모두 제거하고 Streamlit 네이티브 테마 변수 활용
+# [디자인 개선 CSS 적용] 네이티브 테마 변수 활용 및 가독성 확보
 st.markdown("""
     <style>
     div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 900; }
@@ -101,19 +101,47 @@ st.markdown("""
 
 DB_FILE = "manual_done_sites.txt"
 
+# ==========================================
+# [안전 보완] 수동 입력 파일 로드 및 중복 세션 안심 세이빙 엔진
+# ==========================================
 def load_manual_sites():
+    """파일로부터 수동 완료 목록을 신선하게 불러옵니다."""
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return set([line.strip() for line in f.readlines() if line.strip()])
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return set([line.strip() for line in f.readlines() if line.strip()])
+        except Exception as e:
+            st.error(f"데이터 파일 읽기 오류: {e}")
     return set()
 
-def save_manual_sites(sites_set):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        for site in sites_set:
-            f.write(f"{site}\n")
+def add_manual_site(site_with_date):
+    """최신 저장 데이터와 세션을 병합하여 안전하게 추가합니다. (덮어쓰기 방지)"""
+    current_sites = load_manual_sites()
+    current_sites.add(site_with_date)
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            for site in sorted(current_sites):
+                f.write(f"{site}\n")
+    except Exception as e:
+        st.error(f"데이터 파일 저장 오류: {e}")
+    st.session_state['manual_done_sites'] = current_sites
 
-if 'manual_done_sites' not in st.session_state:
-    st.session_state['manual_done_sites'] = load_manual_sites()
+def remove_manual_site(site_with_date):
+    """최신 저장 데이터를 보존하며 안전하게 제거합니다."""
+    current_sites = load_manual_sites()
+    current_sites.discard(site_with_date)
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            for site in sorted(current_sites):
+                f.write(f"{site}\n")
+    except Exception as e:
+        st.error(f"데이터 파일 수정 오류: {e}")
+    st.session_state['manual_done_sites'] = current_sites
+
+
+# 매 실행마다 디스크로부터 신선한 데이터를 반영하여 세션 간 동기화를 충족합니다.
+st.session_state['manual_done_sites'] = load_manual_sites()
+
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "📊 총괄 브리핑"
 if 'search_query' not in st.session_state:
@@ -288,6 +316,7 @@ with st.sidebar:
 
     date_str_key = str(today_kst)
 
+    # 선택된 날짜에 매칭되는 수동 처리 사업장만 실시간 필터링합니다. (날짜 간 독립 처리 실현)
     current_day_done_sites = set()
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
@@ -318,8 +347,8 @@ with st.sidebar:
                 selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
-                    st.session_state['manual_done_sites'].add(f"{standard_name}|{date_str_key}")
-                    save_manual_sites(st.session_state['manual_done_sites'])
+                    # 수동 상태 반영 안전 함수 사용
+                    add_manual_site(f"{standard_name}|{date_str_key}")
                     st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리되었습니다.", icon="✅")
                     st.rerun()
             else:
@@ -327,9 +356,9 @@ with st.sidebar:
                 
             if st.session_state['manual_done_sites']:
                 if st.button("🔄 수동 변경 내역 전체 초기화 (파일 삭제)"):
-                    st.session_state['manual_done_sites'].clear()
                     if os.path.exists(DB_FILE):
                         os.remove(DB_FILE)
+                    st.session_state['manual_done_sites'] = set()
                     st.toast("모든 수동 조치 내역이 초기화되었습니다.")
                     st.rerun()
     elif admin_password:
@@ -416,7 +445,6 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         st.markdown("### 🚦 당일 폭염 단계별 사업장 현황판")
         
         c1, c2, c3, c4 = st.columns(4)
-        # 💡 [디자인 개선] 다크모드에서도 텍스트가 보이도록 배경을 반투명으로 수정, 글자색은 가독성 높게 조정
         with c1:
             st.markdown(f'<div style="background-color: rgba(239, 68, 68, 0.1); border-left: 5px solid #ef4444; padding: 15px; border-radius: 12px; min-height: 120px;"><span style="font-weight: bold; color: #ef4444; font-size: 13px;">🔴 폭염중대경보</span><div style="font-size: 26px; font-weight: 900; color: #ef4444; margin-top: 5px;">{len(g_critical)}개소</div><p style="font-size: 11px; margin-top: 5px; opacity: 0.8; font-weight: bold;">{", ".join(g_critical) if g_critical else "대상 현장 없음"}</p></div>', unsafe_allow_html=True)
         with c2:
@@ -517,7 +545,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             is_high = float(row["체감온도_수치"]) >= 35.0 if row["체감온도_수치"] != "" else False
             m_label = "🟢 일반보건" if is_high == False else "🔥 35도이상 집중관리"
             
-            header_title = f"[{m_label}] {row['사업장명']} (체감 {f'{float(row['체감온도_수치']):.1f}' if row['체감온도_수치']!='' else 'N/A'}°C) | 책임관리자: {row['참여자']}"
+            header_title = f"[{m_label}] {row['사업장명']} (체감 {f'{float(row["체감온도_수치"]):.1f}' if row['체감온도_수치']!='' else 'N/A'}°C) | 책임관리자: {row['참여자']}"
             is_auto_expand = (st.session_state.expanded_site == row['사업장명'])
             
             with st.expander(header_title, expanded=is_auto_expand):
@@ -654,8 +682,8 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             
                             if is_admin:
                                 if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].add(f"{std_name}|{date_str_key}")
-                                    save_manual_sites(st.session_state['manual_done_sites'])
+                                    # [개선 적용] 세션 덮어쓰기 방지 안전 기록 함수 호출
+                                    add_manual_site(f"{std_name}|{date_str_key}")
                                     st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 실시 처리되었습니다.", icon="✅")
                                     st.rerun()
                             else:
@@ -673,10 +701,11 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             site_raw_name = row_submitted['현장명']
                             std_name = row_submitted['표준현장명']
                             
+                            # 관리자인 동시에 해당 일자에 수동 완료 처리된 이력이 존재하는지 안전 확인
                             if is_admin and (f"{std_name}|{date_str_key}" in st.session_state['manual_done_sites']):
                                 if st.button(f"↩️ {site_raw_name}", key=f"toggle_done_{std_name}_{idx}"):
-                                    st.session_state['manual_done_sites'].discard(f"{std_name}|{date_str_key}")
-                                    save_manual_sites(st.session_state['manual_done_sites'])
+                                    # [개선 적용] 수동 목록 안전 제거 함수 호출
+                                    remove_manual_site(f"{std_name}|{date_str_key}")
                                     st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 다시 미실시 환원되었습니다.", icon="🔄")
                                     st.rerun()
                             else:
