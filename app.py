@@ -583,7 +583,11 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
             is_high = float(row["체감온도_수치"]) >= 35.0 if row["체감온도_수치"] != "" else False
             m_label = "🟢 일반보건" if is_high == False else "🔥 35도이상 집중관리"
             
-            header_title = f"[{m_label}] {row['사업장명']} (체감 {f'{float(row[\"체감온도_수치\"]):.1f}' if row['체감온도_수치']!='' else 'N/A'}°C) | 책임관리자: {row['참여자']}"
+            # --- [개선] 문법 오류 방지를 위해 f-string 외부에서 사전 계산 진행 ---
+            temp_val = row['체감온도_수치']
+            temp_str = f"{float(temp_val):.1f}" if temp_val != "" else "N/A"
+            
+            header_title = f"[{m_label}] {row['사업장명']} (체감 {temp_str}°C) | 책임관리자: {row['참여자']}"
             is_auto_expand = (st.session_state.expanded_site == row['사업장명'])
             
             with st.expander(header_title, expanded=is_auto_expand):
@@ -599,13 +603,16 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     p2_text = row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"
                     p3_text = row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"
                     
+                    # 날짜 값 출력 형식 계산
+                    date_display = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) and row['날짜_dt'] != "" else date_str_key
+                    
                     st.markdown(f"""
                     <div class="report-card">
                         <h4>📋 현장 기본 정보</h4>
                         <table class="info-table">
                             <tr><td class="label">보고자</td><td>{row['참여자']}</td></tr>
-                            <tr><td class="label">점검시간</td><td>{row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) and row['날짜_dt'] != "" else date_str_key}</td></tr>
-                            <tr><td class="label">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{f"{float(row['체감온도_수치']):.1f} ℃" if row['체감온도_수치']!='' else 'N/A'}</span></td></tr>
+                            <tr><td class="label">점검시간</td><td>{date_display}</td></tr>
+                            <tr><td class="label">측정 체감온도</td><td><span style="color:#e11d48; font-weight:bold;">{temp_str} ℃</span></td></tr>
                             <tr><td class="label">기상청 특보발효</td><td style="color:#ea580c; font-weight:bold;">{row['폭염특보여부'] if row['폭염특보여부'] != "" else "해당 사항 없음"}</td></tr>
                         </table>
                     </div>
