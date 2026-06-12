@@ -109,7 +109,7 @@ def load_manual_sites():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                # 대소문자 일치를 위해 소문자화 및 공백을 정제하여 세트로 가져옵니다.
+                # 대소문자 및 좌우 공백 일치를 보장하기 위해 소문자화 및 공백 정제
                 return set([line.strip().lower() for line in f.readlines() if line.strip()])
         except Exception as e:
             st.error(f"데이터 파일 읽기 오류: {e}")
@@ -118,7 +118,6 @@ def load_manual_sites():
 def add_manual_site(site_with_date):
     """지정 날짜 및 사업장을 고유하게 보존하며 안전하게 파일에 기록합니다."""
     current_sites = load_manual_sites()
-    # 대소문자 무관을 보장하기 위해 저장 시점부터 소문자로 통일
     current_sites.add(site_with_date.strip().lower())
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
@@ -321,7 +320,29 @@ with st.sidebar:
     
     KST = timezone(timedelta(hours=9))
     current_today = datetime.now(KST).date()
-    available_dates = sorted(raw_df['비교용_날짜'].dropna().unique().tolist(), reverse=True)
+    
+    # -------------------------------------------------------------
+    # [핵심 보완]: 새 데이터 파일 업로드에 대응하는 날짜 병합 로직
+    # -------------------------------------------------------------
+    # 1. data.csv에 있는 날짜를 파싱합니다.
+    csv_dates = raw_df['비교용_날짜'].dropna().unique().tolist()
+    
+    # 2. manual_done_sites.txt에 존재하는 수동 완료 날짜들도 파싱합니다.
+    manual_dates = []
+    for item in st.session_state['manual_done_sites']:
+        if '|' in item:
+            parts = item.split('|')
+            if len(parts) >= 2:
+                try:
+                    # YYYY-MM-DD 형태인지 유효성 검증 후 date 객체로 추가
+                    parsed_date = datetime.strptime(parts[1].strip(), "%Y-%m-%d").date()
+                    manual_dates.append(parsed_date)
+                except ValueError:
+                    pass
+                    
+    # 3. CSV 날짜와 수동 저장된 날짜를 유일 값으로 합칩니다 (새 시트를 업로드해도 과거 날짜가 절대 사라지지 않음)
+    combined_dates_set = set(csv_dates + manual_dates)
+    available_dates = sorted(list(combined_dates_set), reverse=True)
     
     if current_today in available_dates:
         default_idx = available_dates.index(current_today)
@@ -331,7 +352,8 @@ with st.sidebar:
             st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 자동 매칭되었습니다.")
 
     if available_dates:
-        today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx)
+        # selectbox에 고유 key를 부여하여 어제 등 과거 날짜 선택 상태가 컴포넌트 재생성 시 리셋되는 현상을 방지합니다.
+        today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx, key="monitoring_date_select")
         filtered_df = raw_df[raw_df['비교용_날짜'] <= today_kst]
     else:
         today_kst = current_today
@@ -346,7 +368,7 @@ with st.sidebar:
             s_name, s_date = item.split('|', 1)
             if s_date == date_str_key:
                 # 대소문자 구분 없이 동등 매칭을 보장하고자 수동 완료 처리 명칭을 일률적으로 담습니다.
-                current_day_done_sites.add(s_name.lower())
+                current_day_done_sites.add(s_name.lower().strip())
 
     # 🔐 관리자 인증 시스템
     st.markdown("---")
@@ -359,13 +381,13 @@ with st.sidebar:
         st.markdown("##### 🛠️ 사이드바 조작창 (루트 1)")
         
         # 오늘 제출된 원본 및 수집 데이터 또한 대소문자 호환을 위해 전부 소문자 리스트로 전환하여 정밀 대조합니다.
-        today_submitted_raw = [s.lower() for s in (filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].dropna().unique().tolist() if not filtered_df.empty else [])]
+        today_submitted_raw = [s.lower().strip() for s in (filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].dropna().unique().tolist() if not filtered_df.empty else [])]
         
         if not db_master.empty:
-            # 대소문자 불일치 예방을 위하여 'db_master['표준현장명'].str.lower()'를 기준으로 미실시 현장을 찾아냅니다.
+            # 대소문자 불일치 예방을 위하여 'db_master['표준현장명'].str.lower().str.strip()'를 기준으로 미실시 현장을 찾아냅니다.
             missing_sites_for_admin = db_master[
-                (~db_master['표준현장명'].str.lower().isin(today_submitted_raw)) & 
-                (~db_master['표준현장명'].str.lower().isin(current_day_done_sites))
+                (~db_master['표준현장명'].str.lower().str.strip().isin(today_submitted_raw)) & 
+                (~db_master['표준현장명'].str.lower().str.strip().isin(current_day_done_sites))
             ]['현장명'].unique().tolist()
             
             if missing_sites_for_admin:
@@ -373,8 +395,8 @@ with st.sidebar:
                 selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
                 if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
-                    # 수동 상태 반영 안전 함수 사용 (대소문자 전격 통합)
-                    add_manual_site(f"{standard_name}|{date_str_key}")
+                    # 수동 상태 반영 안전 함수 사용 (대소문자 전격 통합 및 고유 날짜 정확 매칭)
+                    add_manual_site(f"{standard_name.strip()}|{date_str_key}")
                     st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리되었습니다.", icon="✅")
                     st.rerun()
             else:
@@ -421,10 +443,10 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     if current_day_done_sites and not db_master.empty:
         for m_site in current_day_done_sites:
             # 대소문자 구분 없이 확인하여 기존 데이터 프레임에 동일한 사이트가 없는지 확실히 비교합니다.
-            existing_site_list = [s.lower() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
+            existing_site_list = [s.lower().strip() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
             if m_site not in existing_site_list:
                 # DB 마스터에서 가상 매칭될 원래 명칭을 가져옵니다.
-                original_site_row = db_master[db_master['표준현장명'].str.lower() == m_site]
+                original_site_row = db_master[db_master['표준현장명'].str.lower().str.strip() == m_site]
                 original_site_name = original_site_row['현장명'].values[0] if not original_site_row.empty else m_site
                 
                 new_row = {col: "" for col in today_df.columns}
@@ -557,9 +579,9 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
     # 조치대장 내역 구성 시 수동 완료 내역 동기화 (대소문자 무관)
     if current_day_done_sites and not db_master.empty:
         for m_site in current_day_done_sites:
-            existing_site_list = [s.lower() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
+            existing_site_list = [s.lower().strip() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
             if m_site not in existing_site_list:
-                original_site_row = db_master[db_master['표준현장명'].str.lower() == m_site]
+                original_site_row = db_master[db_master['표준현장명'].str.lower().str.strip() == m_site]
                 original_site_name = original_site_row['현장명'].values[0] if not original_site_row.empty else m_site
                 
                 new_row = {col: "" for col in today_df.columns}
@@ -678,7 +700,7 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         
         # 기제출 명칭을 전부 소문자로 통일하여 대소문자 호환을 완벽히 맞춤
-        submitted_sites = [s.lower() for s in (today_df['사업장명'].dropna().unique().tolist() if not today_df.empty else [])]
+        submitted_sites = [s.lower().strip() for s in (today_df['사업장명'].dropna().unique().tolist() if not today_df.empty else [])]
         
         # 수동 완료 또한 소문자 통합 리스트에 가입시킵니다.
         if current_day_done_sites:
@@ -691,9 +713,9 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
             team_df = db_master[db_master['관리팀'] == team]
             total_count = len(team_df)
             
-            # 표준현장명 비교 시 대소문자 혼재 예방을 극대화하고자 표준비교용 .str.lower()와 매핑합니다.
-            submitted = team_df[team_df['표준현장명'].str.lower().isin(submitted_sites)].sort_values(by='현장명')
-            missing = team_df[~team_df['표준현장명'].str.lower().isin(submitted_sites)].sort_values(by='현장명')
+            # 표준현장명 비교 시 대소문자 혼재 예방을 극대화하고자 표준비교용 .str.lower().str.strip()과 매핑합니다.
+            submitted = team_df[team_df['표준현장명'].str.lower().str.strip().isin(submitted_sites)].sort_values(by='현장명')
+            missing = team_df[~team_df['표준현장명'].str.lower().str.strip().isin(submitted_sites)].sort_values(by='현장명')
             
             sub_count = len(submitted)
             rate = int((sub_count / total_count * 100)) if total_count > 0 else 0
@@ -732,8 +754,8 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             
                             if is_admin:
                                 if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
-                                    # 저장 시 대소문자를 통합하기 위해 소문자로 병합하여 안전 기록 처리
-                                    add_manual_site(f"{std_name}|{date_str_key}")
+                                    # 저장 시 대소문자를 통합하기 위해 소문자로 병합하여 안전 기록 처리 (date_str_key 보존)
+                                    add_manual_site(f"{std_name.strip()}|{date_str_key}")
                                     st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 실시 처리되었습니다.", icon="✅")
                                     st.rerun()
                             else:
@@ -752,11 +774,11 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             std_name = row_submitted['표준현장명']
                             
                             # 대소문자 무관 처리를 완료한 수동 내역 확인 기법 적용
-                            is_manual_activated = (f"{std_name.lower()}|{date_str_key}" in st.session_state['manual_done_sites'])
+                            is_manual_activated = (f"{std_name.lower().strip()}|{date_str_key}" in st.session_state['manual_done_sites'])
                             
                             if is_admin and is_manual_activated:
                                 if st.button(f"↩️ {site_raw_name}", key=f"toggle_done_{std_name}_{idx}"):
-                                    remove_manual_site(f"{std_name}|{date_str_key}")
+                                    remove_manual_site(f"{std_name.strip()}|{date_str_key}")
                                     st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 다시 미실시 환원되었습니다.", icon="🔄")
                                     st.rerun()
                             else:
