@@ -387,6 +387,7 @@ def load_data(valid_db_names):
     
     return df
 
+# 💡 [버그 수정 완료] KeyError를 발생시키던 불필요한 매핑 로직을 안전한 다이렉트 슬라이싱 및 정제 코드로 복구했습니다.
 @st.cache_data(ttl=60)
 def load_db_data(valid_db_names):
     try:
@@ -395,8 +396,6 @@ def load_db_data(valid_db_names):
         db_df = pd.read_csv('DB.csv', encoding='utf-8')
         
     if '관리팀' in db_df.columns and '현장명' in db_df.columns:
-        db_df = db_df[['col_team' if c == '관리팀' else 'col_site' if c == '현장명' else c for c in db_df.columns]].copy()
-        db_df.rename(columns={'관리팀': '관리팀', '현장명': '현장명'}, inplace=True)
         db_df = db_df[['관리팀', '현장명']].dropna(subset=['관리팀', '현장명']).copy()
     else:
         return pd.DataFrame()
@@ -455,7 +454,7 @@ with st.sidebar:
 
     date_str_key = str(today_kst)
 
-    # 💡 [보완] 현재 선택된 일자(date_str_key)에 일치하는 수동 저장 내역만 타겟팅하여 수집 (이월 방지 핵심 구조)
+    # 💡 [보안] 현재 선택된 일자(date_str_key)에 일치하는 수동 저장 내역만 타겟팅하여 수집 (이월 방지 핵심 구조)
     current_day_done_sites = set()
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
