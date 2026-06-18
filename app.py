@@ -6,7 +6,113 @@ import os
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 페이지 기본 설정 및 다크모드/라이트모드 호환 반응형 테마 적용 
+# 💡 [관리자 전용] 영구 오타 교정 사전 (Single Source of Truth)
+# ==========================================
+# 현장에서 자주 틀리게 입력하는 사업장명이 있다면 아래 형식에 맞춰 계속 추가하세요.
+# 형식: '현장이입력한이상한이름': 'DB에등록된정확한명칭'
+# 주의: 영어는 모두 소문자로, 띄어쓰기는 없이 붙여서 작성해야 완벽히 인식됩니다.
+CUSTOM_TYPO_MAPPING = {
+    '서울보증': '서울보증보험',
+    '경주교원드림센터': '교원경주드림센터',
+    '교원경주드림': '교원경주드림센터',
+    '경주교원드림': '교원경주드림센터',
+    '가든5툴': '가든파이브툴',               
+    '가든5툴백상코퍼레이션': '가든파이브툴',
+    '가든파이툴': '가든파이브툴',             
+    '쿠팡경산1,2fc': '쿠팡경산1,2센터',
+    '쿠팡양지4&7센터': '쿠팡양지4,7센터',
+    '쿠팡양지4&7센타': '쿠팡양지4,7센터',
+    '쿠팡인천TW': '쿠팡인천TW센터',
+    '현대자동차 군산하이테크': '현대차 군산하이테크',
+    '교원대구빌딩': '대구교원',
+    '쿠팡 평택5센타': '쿠팡평택5센터',
+    '슈피겐코리아k231 인천물류센터': '슈피겐물류',
+    '슈피겐코리아k231': '슈피겐물류',
+    '슈피겐k231인천물류센터': '슈피겐물류',
+    '한남동 청암빌딩': '청암빌딩',
+    '국립소방병원': '소방병원',
+    'LG사이언스파크_DP3_동측1차부지': '사이언스파크DP3',
+    '쿠팡 양산1fc': '쿠팡양산1센터',
+    '여수 세이지우드': '세이지우드',
+    '곤지암 2': '쿠팡곤지암2센터',
+    '쿠팡13센터': '쿠팡인천13센터',
+    '교원 파주물류센타': '파주교원물류센터',
+    'LG에너지솔루션 과천R&D캠퍼스': '에너지솔루션과천',
+    '안성8FC': '쿠팡안성8센터',
+    '현대자동차 부산하이테크센터': '현대차부산하이테크',
+    '분당퍼스트타워,백상코퍼레이션': '퍼스트타워',
+    '현대자동차 전주공장 미화팀': '전주현대자동차',
+    '모비스의왕연구소': '의왕연구소',
+    '파크원 LG에너지솔루션': '파크원에너지솔루션',
+    '용산 LG U+ 사옥': 'LG유플러스 용산사옥',
+    'KB증권 대치사옥': 'KB증권 대치',
+    '효성해링턴스퀘어': '공덕해링턴스퀘어',
+    '쿠팡이천1센타': '쿠팡이천1센터',
+    '쿠팡경산1,2': '쿠팡경산1,2센터'
+}
+
+# ==========================================
+# ⚙️ 테스트 편의를 위한 샘플 CSV 파일 자동 생성 모듈
+# ==========================================
+def create_sample_files_if_missing():
+    """DB.csv와 data.csv 파일이 없을 때 예시 데이터 파일들을 자동으로 만들어주는 든든한 헬퍼 함수"""
+    kst = timezone(timedelta(hours=9))
+    today_str = datetime.now(kst).strftime("%Y-%m-%d")
+    yesterday_str = (datetime.now(kst) - timedelta(days=1)).strftime("%Y-%m-%d")
+    two_days_ago_str = (datetime.now(kst) - timedelta(days=2)).strftime("%Y-%m-%d")
+
+    # DB.csv 생성 (기준 마스터 데이터)
+    if not os.path.exists("DB.csv"):
+        sample_db = pd.DataFrame({
+            "관리팀": [
+                "관리1팀", "관리1팀", "관리1팀", 
+                "관리2팀", "관리2팀", "관리2팀", 
+                "관리3팀", "관리3팀", 
+                "영업2본부", "영업2본부"
+            ],
+            "현장명": [
+                "가든파이브툴", "쿠팡경산1,2센터", "대구교원",
+                "교원경주드림센터", "쿠팡인천TW센터", "쿠팡양지4,7센터",
+                "현대차 군산하이테크", "소방병원",
+                "서울보증보험", "사이언스파크DP3"
+            ]
+        })
+        sample_db.to_csv("DB.csv", index=False, encoding="utf-8-sig")
+
+    # data.csv 생성 (점검 일지 데이터)
+    if not os.path.exists("data.csv"):
+        sample_data = pd.DataFrame([
+            {
+                "날짜": today_str, "작성자": "김지킴", "사업장명": "가든5툴", "체감온도": "34.2℃", "폭염특보여부": "주의보",
+                "평상시조치": "시원한 생수 제공 완료 | 휴게공간 그늘막 정비 | TBM 보건교육 진행", "35도이상조치": "N/A", "38도이상조치": "N/A",
+                "음료제공방식": "냉온수기 수시 세척 및 개인 텀블러 사용 권장", "민감군관리": "혈압 이상자 정기 자가측정 유도", "응급조치숙지": "예",
+                "특이사항": "현장 온열예방 이행 실태 최적 수준 유지 중"
+            },
+            {
+                "날짜": today_str, "작성자": "박안전", "사업장명": "쿠팡경산1,2fc", "체감온도": "36.8℃", "폭염특보여부": "경보",
+                "평상시조치": "물/소금 공급 완료 | 에어컨 필터 세척 후 가동 | 의무 휴식시간 부여", "35도이상조치": "옥외 무리한 작업 축소 및 휴식 15분 확대", "38도이상조치": "N/A",
+                "음료제공방식": "정수용 얼음 및 식염포도당 자동 배출기 가동", "민감군관리": "민감 대상 근로자 2명 개별 집중 대화 관리 진행", "응급조치숙지": "예",
+                "특이사항": "폭염 특보에 따른 집중 단축근무 가이드라인 시행"
+            },
+            {
+                "날짜": yesterday_str, "작성자": "최관리", "사업장명": "서울보증", "체감온도": "31.5", "폭염특보여부": "일반",
+                "평상시조치": "음용수 정수 상태 점검 | 실내 공기 순환용 팬 풀 가동", "35도이상조치": "N/A", "38도이상조치": "N/A",
+                "음료제공방식": "개별 생수 및 냉장고 얼음 제공", "민감군관리": "특이 근로자 없음", "응급조치숙지": "예",
+                "특이사항": "사무동 실내 미화 작업으로 온열 스트레스 수준 낮음"
+            },
+            {
+                "날짜": two_days_ago_str, "작성자": "박안전", "사업장명": "쿠팡경산1,2fc", "체감온도": "33.5℃", "폭염특보여부": "주의보",
+                "평상시조치": "이온음료 보충 | 선풍기 증설", "35도이상조치": "N/A", "38도이상조치": "N/A",
+                "음료제공방식": "시원한 이온음료 제공", "민감군관리": "해당 사항 없음", "응급조치숙지": "예",
+                "특이사항": "이상 없음"
+            }
+        ])
+        sample_data.to_csv("data.csv", index=False, encoding="utf-8-sig")
+
+create_sample_files_if_missing()
+
+# ==========================================
+# 1. 페이지 기본 설정 및 반응형 테마 적용 
 # ==========================================
 st.set_page_config(
     page_title="백상가족 건강한 여름나기 종합 대시보드",
@@ -15,7 +121,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# [디자인 개선 CSS 적용] 네이티브 테마 변수 활용 및 가독성 확보
+# 반응형 디자인 및 사용자 편의성 향상을 위한 커스텀 스타일 정의
 st.markdown("""
     <style>
     div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 900; }
@@ -102,21 +208,41 @@ st.markdown("""
 DB_FILE = "manual_done_sites.txt"
 
 # ==========================================
-# 수동 입력 파일 로드 및 세션 동기화 엔진 (수동 처리 내역 영구 보존 보장)
+# 임시 수동 입력 파일 로드 (날짜별 영구 보존 및 자동 마이그레이션 적용)
 # ==========================================
 def load_manual_sites():
-    """텍스트 파일로부터 수동 완료 목록을 실시간으로 불러옵니다."""
+    kst = timezone(timedelta(hours=9))
+    today_str = datetime.now(kst).strftime("%Y-%m-%d")
+    
+    raw_sites = set()
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                # 대소문자 및 좌우 공백 일치를 보장하기 위해 소문자화 및 공백 정제
-                return set([line.strip().lower() for line in f.readlines() if line.strip()])
+                raw_sites = set([line.strip().lower() for line in f.readlines() if line.strip()])
         except Exception as e:
-            st.error(f"데이터 파일 읽기 오류: {e}")
-    return set()
+            st.error(f"수동 조치 파일 로드 중 이상이 발견되었습니다: {e}")
+            
+    # 💡 [보완] 날짜 구분이 없는 레거시 데이터 발견 시 현재 오늘 날짜로 바인딩 마이그레이션 실행
+    migrated = False
+    clean_sites = set()
+    for item in raw_sites:
+        if '|' not in item:
+            clean_sites.add(f"{item}|{today_str}")
+            migrated = True
+        else:
+            clean_sites.add(item)
+            
+    if migrated:
+        try:
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                for site in sorted(clean_sites):
+                    f.write(f"{site}\n")
+        except:
+            pass
+            
+    return clean_sites
 
 def add_manual_site(site_with_date):
-    """지정 날짜 및 사업장을 고유하게 보존하며 안전하게 파일에 기록합니다."""
     current_sites = load_manual_sites()
     current_sites.add(site_with_date.strip().lower())
     try:
@@ -124,11 +250,10 @@ def add_manual_site(site_with_date):
             for site in sorted(current_sites):
                 f.write(f"{site}\n")
     except Exception as e:
-        st.error(f"데이터 파일 저장 오류: {e}")
+        st.error(f"수동 승인 정보 저장 중 실패: {e}")
     st.session_state['manual_done_sites'] = current_sites
 
 def remove_manual_site(site_with_date):
-    """선택된 날짜의 수동 실시 목록을 안전하게 배제하고 파일을 갱신합니다."""
     current_sites = load_manual_sites()
     current_sites.discard(site_with_date.strip().lower())
     try:
@@ -136,13 +261,13 @@ def remove_manual_site(site_with_date):
             for site in sorted(current_sites):
                 f.write(f"{site}\n")
     except Exception as e:
-        st.error(f"데이터 파일 수정 오류: {e}")
+        st.error(f"수동 승인 변경사항 저장 중 실패: {e}")
     st.session_state['manual_done_sites'] = current_sites
 
 
-# 앱 매 실행 시점마다 디스크로부터 최신 기록을 불러와 세션 간 상태를 동기화합니다.
-st.session_state['manual_done_sites'] = load_manual_sites()
-
+# Session State 기본값 초기화
+if 'manual_done_sites' not in st.session_state:
+    st.session_state['manual_done_sites'] = load_manual_sites()
 if 'current_tab' not in st.session_state:
     st.session_state.current_tab = "📊 총괄 브리핑"
 if 'search_query' not in st.session_state:
@@ -151,7 +276,7 @@ if 'expanded_site' not in st.session_state:
     st.session_state.expanded_site = None
 
 # ==========================================
-# 2. 강력한 데이터 정제 및 유연한 대소문자 통합 컬럼 매핑 엔진 
+# 2. 강력한 데이터 정제 및 유연한 컬럼 매핑 엔진 
 # ==========================================
 
 @st.cache_data(ttl=60)
@@ -165,46 +290,27 @@ def get_valid_db_names():
             return []
             
     if '현장명' in db_df.columns:
-        # 반환하는 모든 기준 현장명도 완전히 표준 소문자 규격으로 통일합니다.
         return db_df['현장명'].dropna().apply(standardize_site_name_base).unique().tolist()
     return []
 
 
 def standardize_site_name_base(name):
-    """
-    텍스트 표준화 및 소문자 전처리 통합 함수
-    영어 알파벳이 들어온 경우 대문자와 소문자 구분을 제거(전원 소문자화)하여 비교 매칭 신뢰성을 극대화합니다.
-    """
-    # 1단계: 강제 문자열 변환 후 공백 및 탭을 완전히 지우고 소문자로 치환
+    # 특수 문자 및 띄어쓰기를 완벽하게 정제
     name = str(name).replace(" ", "").lower().strip()
-    
-    # 2단계: 자음/모음 등 노이즈 문자 제거
     name = re.sub(r'[ㄱ-ㅎㅏ-ㅣ]', '', name)
     
-    # 3단계: 특정 중요 예외 단어의 유연 매핑 정의 (모든 키는 소문자로 일치)
-    early_mapping = {
-        '서울보증': '서울보증보험',
-        '경주교원드림센터': '교원경주드림센터',
-        '교원경주드림': '교원경주드림센터',
-        '경주교원드림': '교원경주드림센터',
-        '가든5툴': '가든파이브툴',               
-        '가든5툴백상코퍼레이션': '가든파이브툴',
-        '가든파이툴': '가든파이브툴',             
-        '쿠팡경산1,2fc': '쿠팡경산1,2센터',
-        '쿠팡경산1,2': '쿠팡경산1,2센터'
-    }
-    
-    # 매핑 목록 또한 소문자로 비교하여 치환합니다.
-    early_mapping = {k.lower(): v.lower() for k, v in early_mapping.items()}
+    # [적용] CUSTOM_TYPO_MAPPING을 이용한 글로벌 오타 정정 체계 호출
+    early_mapping = {k.lower(): v.lower() for k, v in CUSTOM_TYPO_MAPPING.items()}
     name = early_mapping.get(name, name)
     
-    if name in ['교원경주드림센터', '서울보증보험', '가든파이브툴', '쿠팡경산1,2센터']:
+    # 예외 리스트 원본 보존 검사
+    protected_names = [v.lower() for v in CUSTOM_TYPO_MAPPING.values()]
+    if name in protected_names:
         return name
 
-    # 4단계: 잔여 명칭 규격화
+    # 잔여 명칭 규격화 표준 필터 적용
     name = name.replace('현장', '').replace('지점', '')
     name = name.replace('샌타', '센터')
-    # 알파벳 'fc'를 '센터'로 가볍게 통일 (소문자화 상태이므로 정확히 매칭됨)
     name = name.replace('fc', '센터')
         
     name_mapping = {'성우프로젝트': '성우', '성우건설': '성우', '(주)성우': '성우'}
@@ -214,17 +320,12 @@ def standardize_site_name_base(name):
 
 
 def standardize_site_name(name, valid_db_names):
-    """대소문자 무관 처리가 가미된 마스터 DB 기반 현장명 표준화 과정"""
     name = standardize_site_name_base(name)
     if valid_db_names:
-        # 길이 순 정렬하여 부분 일치 중첩 오류 방지
         for db_name in sorted(valid_db_names, key=len, reverse=True):
-            # 대소문자 완벽 호환을 보장하기 위해 한 번 더 소문자 대조 처리
             if db_name.lower() in name.lower() or name.lower() in db_name.lower():
                 return db_name
-                
     return name
-
 
 valid_db_names_tuple = tuple(get_valid_db_names())
 
@@ -282,7 +383,7 @@ def load_data(valid_db_names):
     df['날짜_dt'] = pd.to_datetime(df['날짜'], errors='coerce')
     df['월'] = df['날짜_dt'].dt.month
     df['체감온도_수치'] = df['체감온도'].astype(str).str.extract(r'(\d+\.?\d*)').astype(float)
-    df['특보발효건수'] = df['폭염특보여부'].astype(str).apply(lambda x: 1 if '발표됨' in x or '예' in x or '경보' in x or '주의보' in x else 0)
+    df['특보발효건수'] = df['폭염특보여부'].astype(str).apply(lambda x: 1 if any(kw in x for kw in ['발표됨', '예', '경보', '주의보']) else 0)
     
     return df
 
@@ -294,6 +395,8 @@ def load_db_data(valid_db_names):
         db_df = pd.read_csv('DB.csv', encoding='utf-8')
         
     if '관리팀' in db_df.columns and '현장명' in db_df.columns:
+        db_df = db_df[['col_team' if c == '관리팀' else 'col_site' if c == '현장명' else c for c in db_df.columns]].copy()
+        db_df.rename(columns={'관리팀': '관리팀', '현장명': '현장명'}, inplace=True)
         db_df = db_df[['관리팀', '현장명']].dropna(subset=['관리팀', '현장명']).copy()
     else:
         return pd.DataFrame()
@@ -321,26 +424,18 @@ with st.sidebar:
     KST = timezone(timedelta(hours=9))
     current_today = datetime.now(KST).date()
     
-    # -------------------------------------------------------------
-    # [핵심 보완]: 새 데이터 파일 업로드에 대응하는 날짜 병합 로직
-    # -------------------------------------------------------------
-    # 1. data.csv에 있는 날짜를 파싱합니다.
     csv_dates = raw_df['비교용_날짜'].dropna().unique().tolist()
-    
-    # 2. manual_done_sites.txt에 존재하는 수동 완료 날짜들도 파싱합니다.
     manual_dates = []
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
             parts = item.split('|')
             if len(parts) >= 2:
                 try:
-                    # YYYY-MM-DD 형태인지 유효성 검증 후 date 객체로 추가
                     parsed_date = datetime.strptime(parts[1].strip(), "%Y-%m-%d").date()
                     manual_dates.append(parsed_date)
                 except ValueError:
                     pass
                     
-    # 3. CSV 날짜와 수동 저장된 날짜를 유일 값으로 합칩니다 (새 시트를 업로드해도 과거 날짜가 절대 사라지지 않음)
     combined_dates_set = set(csv_dates + manual_dates)
     available_dates = sorted(list(combined_dates_set), reverse=True)
     
@@ -349,10 +444,9 @@ with st.sidebar:
     else:
         default_idx = 0 
         if available_dates:
-            st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 데이터 일자로 자동 매칭되었습니다.")
+            st.sidebar.warning(f"⚠️ 금일({current_today}) 데이터가 아직 제출되지 않아, 가장 최근 일자로 자동 매칭되었습니다.")
 
     if available_dates:
-        # selectbox에 고유 key를 부여하여 어제 등 과거 날짜 선택 상태가 컴포넌트 재생성 시 리셋되는 현상을 방지합니다.
         today_kst = st.selectbox("📅 모니터링 기준일 선택", available_dates, index=default_idx, key="monitoring_date_select")
         filtered_df = raw_df[raw_df['비교용_날짜'] <= today_kst]
     else:
@@ -361,13 +455,12 @@ with st.sidebar:
 
     date_str_key = str(today_kst)
 
-    # 선택된 날짜에 매칭되는 수동 처리 사업장만 실시간 독립 필터링 (완벽히 소문자 기반 매칭 처리)
+    # 💡 [보완] 현재 선택된 일자(date_str_key)에 일치하는 수동 저장 내역만 타겟팅하여 수집 (이월 방지 핵심 구조)
     current_day_done_sites = set()
     for item in st.session_state['manual_done_sites']:
         if '|' in item:
             s_name, s_date = item.split('|', 1)
             if s_date == date_str_key:
-                # 대소문자 구분 없이 동등 매칭을 보장하고자 수동 완료 처리 명칭을 일률적으로 담습니다.
                 current_day_done_sites.add(s_name.lower().strip())
 
     # 🔐 관리자 인증 시스템
@@ -378,13 +471,13 @@ with st.sidebar:
     
     if is_admin:
         st.success("🔑 관리자 권한 확인")
-        st.markdown("##### 🛠️ 사이드바 조작창 (루트 1)")
+        st.markdown("##### 🛠️ 사이드바 조작창")
         
-        # 오늘 제출된 원본 및 수집 데이터 또한 대소문자 호환을 위해 전부 소문자 리스트로 전환하여 정밀 대조합니다.
+        st.info("⚠️ 수동 지정된 내역은 파일에 등록되어 영구적으로 보존됩니다. 단, 신규 data.csv 업로드로 서버 환경이 리셋되면 소멸할 수 있으므로, 실제 결과 보고서 작성을 위해 나중에 원본 엑셀에도 꼭 반영해 주세요.")
+        
         today_submitted_raw = [s.lower().strip() for s in (filtered_df[filtered_df['비교용_날짜'] == today_kst]['사업장명'].dropna().unique().tolist() if not filtered_df.empty else [])]
         
         if not db_master.empty:
-            # 대소문자 불일치 예방을 위하여 'db_master['표준현장명'].str.lower().str.strip()'를 기준으로 미실시 현장을 찾아냅니다.
             missing_sites_for_admin = db_master[
                 (~db_master['표준현장명'].str.lower().str.strip().isin(today_submitted_raw)) & 
                 (~db_master['표준현장명'].str.lower().str.strip().isin(current_day_done_sites))
@@ -392,23 +485,47 @@ with st.sidebar:
             
             if missing_sites_for_admin:
                 missing_sites_for_admin.sort()
-                selected_site = st.selectbox("실시로 변경할 현장 선택", missing_sites_for_admin)
-                if st.button("선택 현장 '실시'로 강제 전환 및 저장"):
+                selected_site = st.selectbox("당일 임시 실시로 변경할 현장", missing_sites_for_admin)
+                if st.button("선택 현장 '실시'로 강제 전환 (당일 유지)"):
                     standard_name = standardize_site_name(selected_site, valid_db_names_tuple)
-                    # 수동 상태 반영 안전 함수 사용 (대소문자 전격 통합 및 고유 날짜 정확 매칭)
                     add_manual_site(f"{standard_name.strip()}|{date_str_key}")
-                    st.toast(f"📢 [{selected_site}] 현장이 {date_str_key} 일자로 실시 처리되었습니다.", icon="✅")
+                    st.toast(f"📢 [{selected_site}] 현장이 임시 실시 처리되었습니다.", icon="✅")
                     st.rerun()
             else:
-                st.info("모든 사업장이 제출을 완료했습니다.")
+                st.success("모든 사업장이 제출을 완료했습니다.")
                 
-            if st.session_state['manual_done_sites']:
-                if st.button("🔄 수동 변경 내역 전체 초기화 (파일 삭제)"):
-                    if os.path.exists(DB_FILE):
-                        os.remove(DB_FILE)
-                    st.session_state['manual_done_sites'] = set()
-                    st.toast("모든 수동 조치 내역이 초기화되었습니다.")
-                    st.rerun()
+            # 💡 [개선] 과거 데이터 안전 보장을 위한 날짜별 맞춤형 세분화 초기화 관리 메뉴 도입
+            st.markdown("---")
+            with st.expander("🗑️ 수동 조치 초기화 메뉴"):
+                current_date_items = [item for item in st.session_state['manual_done_sites'] if item.endswith(f"|{date_str_key}")]
+                if current_date_items:
+                    if st.button(f"🔄 {date_str_key} 수동 조치만 초기화", key="reset_current_day"):
+                        new_sites = {item for item in st.session_state['manual_done_sites'] if not item.endswith(f"|{date_str_key}")}
+                        try:
+                            with open(DB_FILE, "w", encoding="utf-8") as f:
+                                for site in sorted(new_sites):
+                                    f.write(f"{site}\n")
+                        except Exception as e:
+                            st.error(f"데이터 파일 수정 오류: {e}")
+                        st.session_state['manual_done_sites'] = new_sites
+                        st.toast(f"📢 [{date_str_key}] 자의 수동 조치 내역이 초기화되었습니다.")
+                        st.rerun()
+                else:
+                    st.markdown(f"<div style='font-size: 12.5px; opacity:0.8;'>ℹ️ {date_str_key} 자에 등록된 수동 조치가 없습니다.</div>", unsafe_allow_html=True)
+                
+                if st.session_state['manual_done_sites']:
+                    st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+                    st.warning("⚠️ 모든 날짜의 전체 기록을 소멸시키려면 아래 버튼을 사용하세요.")
+                    if st.button("🚨 전체 날짜 수동 조치 영구 삭제", key="reset_all_history"):
+                        if os.path.exists(DB_FILE):
+                            try:
+                                os.remove(DB_FILE)
+                            except:
+                                pass
+                        st.session_state['manual_done_sites'] = set()
+                        st.toast("모든 날짜의 전체 수동조치 이력이 삭제되었습니다.")
+                        st.rerun()
+                        
     elif admin_password:
         st.error("❌ 비밀번호가 틀렸습니다.")
 
@@ -439,13 +556,10 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
     st.markdown(f"### 🚨 당일 현장 위험도 집중 모니터링 ({today_kst.strftime('%Y-%m-%d')})")
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 영구 보존용 파일 내역을 토대로 당일 가상의 수동 완료 로우(row)를 생성해 매칭합니다.
     if current_day_done_sites and not db_master.empty:
         for m_site in current_day_done_sites:
-            # 대소문자 구분 없이 확인하여 기존 데이터 프레임에 동일한 사이트가 없는지 확실히 비교합니다.
             existing_site_list = [s.lower().strip() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
             if m_site not in existing_site_list:
-                # DB 마스터에서 가상 매칭될 원래 명칭을 가져옵니다.
                 original_site_row = db_master[db_master['표준현장명'].str.lower().str.strip() == m_site]
                 original_site_name = original_site_row['현장명'].values[0] if not original_site_row.empty else m_site
                 
@@ -453,7 +567,7 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
                 new_row['사업장명'] = original_site_name
                 new_row['체감온도_수치'] = 25.0 
                 new_row['폭염특보여부'] = "일반"
-                new_row['참여자'] = "본사 보건관리자"
+                new_row['참여자'] = "본사 보건관리자 (수동승인)"
                 new_row['평상시조치'] = "본사 점검 승인 완료"
                 today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
 
@@ -516,14 +630,20 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
         for idx, r in today_df.iterrows():
             badge = r['경보단계_명칭']
             if "일반" in badge: continue
-            m_str = str(r['평상시조치'])
+            
+            p1_text_raw = str(r['평상시조치'])
+            if any(kw in p1_text_raw for kw in ['깨끗하고 시원한 물', '이온음료', '포도당', '식수']):
+                water_status = '🟢'
+            else:
+                water_status = '🟢' if any(kw in p1_text_raw for kw in ['물', '음료', '식수', '포도당']) else '🔴'
+                
             summary_rows.append({
                 '사업장명': r['사업장명'], '경보단계': badge, '체감온도': f"{float(r['체감온도_수치']):.1f} ℃" if r['체감온도_수치'] != "" else "N/A",
-                '물/음료': '🟢' if any(kw in m_str for kw in ['물', '음료', '식수', '포도당']) else '🔴',
-                '그늘막': '🟢' if any(kw in m_str for kw in ['그늘', '휴게', '쉼터']) else '🔴',
-                'TBM교육': '🟢' if any(kw in m_str for kw in ['교육', 'TBM']) else '🔴',
-                '민감군': '🟢' if '예' in str(r['민감군관리']) or '관리' in str(r['민감군관리']) else '🔴',
-                '응급숙지': '🟢' if '예' in str(r['응급조치숙지']) or '이해' in str(r['응급조치숙지']) else '🔴'
+                '물/음료': water_status,
+                '그늘막': '🟢' if any(kw in p1_text_raw for kw in ['그늘', '휴게', '쉼터', '그늘막']) else '🔴',
+                'TBM교육': '🟢' if any(kw in p1_text_raw for kw in ['교육', 'TBM', '안전보건']) else '🔴',
+                '민감군': '🟢' if '예' in str(r['민감군관리']) or '관리' in str(r['민감군관리']) or any(kw in str(r['민감군관리']) for kw in ['이행', '완료']) else '🔴',
+                '응급숙지': '🟢' if '예' in str(r['응급조치숙지']) or '이해' in str(r['응급조치숙지']) or '숙지' in str(r['응급조치숙지']) else '🔴'
             })
             
         if summary_rows:
@@ -556,10 +676,10 @@ if st.session_state.current_tab == "📊 총괄 브리핑":
                         st.session_state.search_query = row_item['사업장명']
                         st.rerun()
         else:
-            st.success("✅ 금일 기준 체감온도 33℃ 이상인 우려 사업장이 없습니다.")
+            st.success("✅ 금일 기준 체감온도 33℃ 이상인 고온 우려 사업장이 존재하지 않습니다.")
             
     else:
-        st.info("ℹ️ 선택한 기준일에 제출된 현장 점검 데이터가 없습니다.")
+        st.info("ℹ️ 선택한 기준일에 제출된 점검 결과가 부재합니다.")
 
 # ------------------------------------------
 # MODE 2: 전국 사업장 조치대장
@@ -576,7 +696,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
 
     today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
     
-    # 조치대장 내역 구성 시 수동 완료 내역 동기화 (대소문자 무관)
     if current_day_done_sites and not db_master.empty:
         for m_site in current_day_done_sites:
             existing_site_list = [s.lower().strip() for s in today_df['사업장명'].dropna().values] if not today_df.empty else []
@@ -588,9 +707,9 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 new_row['사업장명'] = original_site_name
                 new_row['체감온도_수치'] = 25.0
                 new_row['폭염특보여부'] = "일반"
-                new_row['참여자'] = "본사 보건관리자"
+                new_row['참여자'] = "본사 보건관리자 (수동승인)"
                 new_row['평상시조치'] = "본사 이행 상태 확인"
-                new_row['특이사항'] = "현장 점검 완료 처리된 사업장입니다."
+                new_row['특이사항'] = "현장 점검 완료 임시 처리된 사업장입니다."
                 today_df = pd.concat([today_df, pd.DataFrame([new_row])], ignore_index=True)
 
     site_df = today_df.sort_values('체감온도_수치', ascending=False).copy() if not today_df.empty else pd.DataFrame()
@@ -599,13 +718,12 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
         site_df = site_df[site_df["사업장명"].astype(str).str.contains(search_query, na=False) | site_df["참여자"].astype(str).str.contains(search_query, na=False)]
 
     if site_df.empty:
-        st.info("조건에 맞는 데이터가 존재하지 않습니다.")
+        st.info("조건에 일치하는 데이터 보고 내역이 없습니다.")
     else:
         for idx, row in site_df.iterrows():
             is_high = float(row["체감온도_수치"]) >= 35.0 if row["체감온도_수치"] != "" else False
             m_label = "🟢 일반보건" if is_high == False else "🔥 35도이상 집중관리"
             
-            # --- [개선] 문법 오류 방지를 위해 f-string 외부에서 사전 계산 진행 ---
             temp_val = row['체감온도_수치']
             temp_str = f"{float(temp_val):.1f}" if temp_val != "" else "N/A"
             
@@ -617,7 +735,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                 
                 with col_left:
                     p1_text_raw = str(row['평상시조치'])
-                    if '깨끗하고 시원한 물' in p1_text_raw or '이온음료' in p1_text_raw or '포도당' in p1_text_raw or '식수' in p1_text_raw:
+                    if any(kw in p1_text_raw for kw in ['깨끗하고 시원한 물', '이온음료', '포도당', '식수']):
                         p1_text = "✅ 식수 및 음료 지급 실시 중"
                     else:
                         p1_text = row['음료제공방식'] if row['음료제공방식'] != "" else "데이터 미지정"
@@ -625,7 +743,6 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     p2_text = row['민감군관리'] if row['민감군관리'] != "" else "데이터 미지정"
                     p3_text = row['응급조치숙지'] if row['응급조치숙지'] != "" else "데이터 미지정"
                     
-                    # 날짜 값 출력 형식 계산
                     date_display = row['날짜_dt'].strftime('%Y-%m-%d') if pd.notna(row['날짜_dt']) and row['날짜_dt'] != "" else date_str_key
                     
                     st.markdown(f"""
@@ -678,7 +795,7 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                if row['참여자'] != "본사 보건관리자":
+                if "수동승인" not in str(row['참여자']):
                     st.markdown("#### 📈 체감온도 누적 변화 추이")
                     history_df = filtered_df[filtered_df["사업장명"] == row["사업장명"]].sort_values(by="날짜")
                     if not history_df.empty:
@@ -692,17 +809,15 @@ elif st.session_state.current_tab == "🏢 전국 사업장 조치대장":
 # ------------------------------------------
 elif st.session_state.current_tab == "✅ 팀별 실시 현황":
     st.subheader(f"📊 부서별 온열질환 체크리스트 관리 현황 ({today_kst.strftime('%Y-%m-%d')} 기준)")
-    st.markdown("<p style='font-size: 13px; opacity: 0.8; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출된 현장과 제출되지 않은 현장을 추적합니다.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 13px; opacity: 0.8; margin-top: -10px;'>DB.csv 마스터 데이터의 [관리팀] 및 [현장명]을 기반으로, 당일 제출 완료 현장과 미실시 상태를 실시간 매칭합니다.</p>", unsafe_allow_html=True)
 
     if db_master.empty:
-        st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 컬럼이 존재하지 않습니다. 파일을 확인해주세요.")
+        st.error("⚠️ `DB.csv` 파일을 찾을 수 없거나 '관리팀', '현장명' 구조가 상이합니다. 양식을 점검해 주십시오.")
     else:
         today_df = filtered_df[filtered_df['비교용_날짜'] == today_kst].copy() if not filtered_df.empty else pd.DataFrame()
         
-        # 기제출 명칭을 전부 소문자로 통일하여 대소문자 호환을 완벽히 맞춤
         submitted_sites = [s.lower().strip() for s in (today_df['사업장명'].dropna().unique().tolist() if not today_df.empty else [])]
         
-        # 수동 완료 또한 소문자 통합 리스트에 가입시킵니다.
         if current_day_done_sites:
             submitted_sites = list(set(submitted_sites + list(current_day_done_sites)))
 
@@ -713,7 +828,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
             team_df = db_master[db_master['관리팀'] == team]
             total_count = len(team_df)
             
-            # 표준현장명 비교 시 대소문자 혼재 예방을 극대화하고자 표준비교용 .str.lower().str.strip()과 매핑합니다.
             submitted = team_df[team_df['표준현장명'].str.lower().str.strip().isin(submitted_sites)].sort_values(by='현장명')
             missing = team_df[~team_df['표준현장명'].str.lower().str.strip().isin(submitted_sites)].sort_values(by='현장명')
             
@@ -740,7 +854,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                 )
                 
                 if team_search_query:
-                    # 미실시 사업장 검색 시에도 영문 대소문자 무관을 위해 소문자로 통합 매칭합니다.
                     filtered_missing = missing[missing['현장명'].astype(str).str.lower().str.contains(team_search_query.lower(), na=False)].sort_values(by='현장명')
                 else:
                     filtered_missing = missing
@@ -754,9 +867,8 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             
                             if is_admin:
                                 if st.button(f"{site_raw_name}", key=f"toggle_missing_{std_name}_{idx}"):
-                                    # 저장 시 대소문자를 통합하기 위해 소문자로 병합하여 안전 기록 처리 (date_str_key 보존)
                                     add_manual_site(f"{std_name.strip()}|{date_str_key}")
-                                    st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 실시 처리되었습니다.", icon="✅")
+                                    st.toast(f"📢 [{site_raw_name}] 현장이 {date_str_key} 자로 임시 실시 처리되었습니다.", icon="✅")
                                     st.rerun()
                             else:
                                 st.markdown(f"<div class='status-box missing-box'>{site_raw_name}</div>", unsafe_allow_html=True)
@@ -773,7 +885,6 @@ elif st.session_state.current_tab == "✅ 팀별 실시 현황":
                             site_raw_name = row_submitted['현장명']
                             std_name = row_submitted['표준현장명']
                             
-                            # 대소문자 무관 처리를 완료한 수동 내역 확인 기법 적용
                             is_manual_activated = (f"{std_name.lower().strip()}|{date_str_key}" in st.session_state['manual_done_sites'])
                             
                             if is_admin and is_manual_activated:
